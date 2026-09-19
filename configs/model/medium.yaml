@@ -1,0 +1,21 @@
+# Fontaine Medium — requires a GPU with >= 16 GB VRAM (or FSDP/offloading).
+# Architectural target: roughly 130-160M parameters. NOT trainable on the
+# initial 16 GB RAM machine in reasonable time; provided to prove that the
+# same codebase and config schema cover larger models without code changes.
+model:
+  architecture: decoder_transformer
+  vocab_size: auto
+  hidden_size: 768
+  num_layers: 12
+  num_attention_heads: 12
+  num_kv_heads: 4
+  intermediate_size: 2048
+  max_sequence_length: 1024
+  rope_theta: 10000.0
+  dropout: 0.0
+  activation: swiglu
+  normalization: rmsnorm
+  norm_eps: 0.00001
+  tie_word_embeddings: true
+  attention_bias: false
+  mlp_bias: false

@@ -1,0 +1,954 @@
+You are a senior AI/ML systems architect, LLM researcher, and production software engineer.
+
+I want you to design a **very high-level but technically serious architecture for my own AI model called `Fontaine AI`**.
+
+My goal is to build and train the model using **my own datasets**, initially on a machine with only **16 GB RAM**, while designing the software and model architecture so that it can later scale dramatically — potentially toward architectures and infrastructure capable of supporting models in the general class of modern large language models such as GPT/Gemini-class systems.
+
+Do NOT design a toy project that must be completely rewritten later.
+
+The initial implementation must be small, modular, understandable, memory-efficient, and runnable on 16 GB RAM, while the architecture must have clear extension points for distributed training, larger models, multiple GPUs, larger datasets, multimodal capabilities, inference serving, RL/post-training, and eventually very large models.
+
+## 1. First: Explain the Architecture
+
+Before writing code, explain:
+
+* What Fontaine AI is.
+* The overall architecture.
+* The model architecture.
+* Training architecture.
+* Data pipeline.
+* Tokenizer.
+* Dataset format.
+* Configuration system.
+* Checkpoint system.
+* Evaluation system.
+* Inference system.
+* Experiment tracking.
+* Distributed-training strategy for future scaling.
+* How the 16 GB RAM version differs from the future large-scale version.
+* Which components should remain stable as the model grows.
+* Which components will need to be replaced or expanded later.
+
+Create a clear architecture diagram using Mermaid where appropriate.
+
+Example conceptual flow:
+
+Dataset
+→ Data Cleaning
+→ Dataset Validation
+→ Tokenizer
+→ Preprocessing
+→ Token Shards
+→ DataLoader
+→ Model
+→ Training Loop
+→ Checkpoints
+→ Evaluation
+→ Inference
+
+Also show the future architecture:
+
+Raw Data
+→ Data Lake
+→ Distributed Preprocessing
+→ Tokenized Shards
+→ Distributed DataLoader
+→ Multi-GPU / Multi-Node Training
+→ Checkpoint Storage
+→ Evaluation
+→ Post-Training
+→ Model Registry
+→ Distributed Inference
+
+## 2. Core Design Principle
+
+Use a **modular architecture**.
+
+Do not hard-code the project around a single model size.
+
+The model must be configurable through files rather than requiring source-code changes.
+
+For example:
+
+configs/
+model/
+training/
+data/
+inference/
+
+The same codebase should theoretically support:
+
+* tiny development model
+* small model
+* medium model
+* large model
+* distributed model
+
+without redesigning the entire repository.
+
+## 3. Initial Hardware Constraint
+
+The first target environment is:
+
+* RAM: 16 GB
+* Consumer/development hardware
+* Limited compute
+* Potentially CPU-only or a modest GPU
+* Local filesystem
+* Small-to-medium custom datasets
+
+Design the initial system so it does not unnecessarily load the entire dataset or model into RAM.
+
+Use:
+
+* streaming datasets where appropriate
+* memory mapping
+* sharded datasets
+* lazy loading
+* gradient accumulation
+* mixed precision where supported
+* checkpointing
+* configurable sequence length
+* configurable batch size
+* configurable number of parameters
+
+Clearly identify what is feasible on 16 GB RAM and what is NOT.
+
+Do not pretend that a GPT/Gemini-scale model can actually be trained on a 16 GB machine.
+
+The architecture should be scalable, but the initial training system must remain realistic.
+
+## 4. Model Architecture
+
+For the initial Fontaine language model, use a modern decoder-only Transformer architecture unless you have a strong technical reason to choose something else.
+
+Design configurable components such as:
+
+* token embeddings
+* positional encoding / RoPE
+* Transformer blocks
+* self-attention
+* grouped-query attention if appropriate
+* feed-forward network
+* normalization
+* residual connections
+* output/language-model head
+
+Make important architectural choices configurable.
+
+For example:
+
+model:
+vocab_size
+hidden_size
+num_layers
+num_attention_heads
+num_kv_heads
+intermediate_size
+max_sequence_length
+rope_theta
+dropout
+activation
+normalization
+tie_word_embeddings
+
+Do not hard-code these values throughout the source code.
+
+Explain why each component exists.
+
+## 5. Scaling Strategy
+
+Design a clear model scaling path.
+
+For example:
+
+Fontaine Tiny
+→ Fontaine Small
+→ Fontaine Medium
+→ Fontaine Large
+→ Fontaine XL
+→ Distributed Fontaine
+
+Give approximate parameter ranges for each stage, but emphasize that these are architectural targets rather than promises that they can be trained on the initial hardware.
+
+Explain:
+
+* parameter scaling
+* context-length scaling
+* vocabulary scaling
+* data scaling
+* compute scaling
+* GPU-memory scaling
+* multi-GPU scaling
+* multi-node scaling
+
+Explain which scaling dimensions affect:
+
+* RAM
+* VRAM
+* disk
+* training time
+* inference latency
+
+## 6. Repository / Folder Structure
+
+Create a professional repository structure.
+
+It should look conceptually similar to:
+
+fontaine-ai/
+├── README.md
+├── LICENSE
+├── pyproject.toml
+├── requirements/
+├── configs/
+├── docs/
+├── scripts/
+├── src/
+│   └── fontaine/
+│       ├── models/
+│       ├── tokenizer/
+│       ├── data/
+│       ├── training/
+│       ├── evaluation/
+│       ├── inference/
+│       ├── distributed/
+│       ├── checkpointing/
+│       ├── optimization/
+│       ├── generation/
+│       ├── utils/
+│       └── cli/
+├── tests/
+├── datasets/
+├── checkpoints/
+├── experiments/
+├── logs/
+└── tools/
+
+Improve this structure where necessary.
+
+For every important directory, explain:
+
+* its responsibility
+* what belongs there
+* what should NOT belong there
+* how it can evolve when Fontaine becomes larger
+
+Separate source code from:
+
+* datasets
+* generated artifacts
+* checkpoints
+* logs
+* experiments
+* configuration
+
+Do not commit huge datasets or model checkpoints into Git.
+
+## 7. Documentation
+
+Create a documentation strategy from the beginning.
+
+Include:
+
+docs/
+├── architecture/
+├── model/
+├── data/
+├── training/
+├── evaluation/
+├── inference/
+├── scaling/
+├── deployment/
+├── research/
+└── development/
+
+Explain what documentation each section should contain.
+
+Create documentation for:
+
+* architecture
+* model design
+* training process
+* dataset format
+* tokenizer
+* configuration
+* checkpoint format
+* experiment workflow
+* evaluation
+* inference
+* scaling
+* debugging
+* reproducibility
+* deployment
+* security
+* licensing/data provenance
+
+## 8. Dataset Architecture
+
+I want to train Fontaine using my own data.
+
+Design a robust data pipeline.
+
+Support future dataset types such as:
+
+* plain text
+* JSON
+* JSONL
+* CSV
+* documents
+* conversations
+* instruction/response data
+* code
+* potentially multimodal data later
+
+The pipeline should look conceptually like:
+
+Raw Data
+→ Validation
+→ Cleaning
+→ Deduplication
+→ Filtering
+→ Normalization
+→ Tokenization
+→ Packing
+→ Sharding
+→ Dataset Manifest
+→ Training
+
+Explain how to avoid loading huge datasets into RAM.
+
+Design a dataset manifest containing metadata such as:
+
+* dataset name
+* version
+* source
+* license
+* language
+* number of documents
+* token count
+* preprocessing version
+* tokenizer version
+* checksum/hash
+* creation date
+
+Include data provenance and licensing considerations.
+
+## 9. Tokenizer
+
+Design a tokenizer subsystem that is independent from the model.
+
+It should support:
+
+* training a tokenizer from my own corpus
+* saving/loading tokenizer
+* vocabulary management
+* special tokens
+* versioning
+* encode/decode
+* batch encoding
+
+Explain possible tokenizer choices such as:
+
+* BPE
+* Byte-level BPE
+* SentencePiece
+* Unigram
+
+Recommend an appropriate initial approach and explain why.
+
+Make the tokenizer replaceable without rewriting the model.
+
+## 10. Training System
+
+Design a proper training engine.
+
+It should support:
+
+* configurable batch size
+* gradient accumulation
+* learning rate
+* warmup
+* learning-rate scheduler
+* optimizer
+* weight decay
+* gradient clipping
+* mixed precision
+* checkpoint intervals
+* evaluation intervals
+* logging
+* resume-from-checkpoint
+* early stopping where appropriate
+* random seeds
+* deterministic/reproducible settings where practical
+
+The training loop should not contain dataset-specific logic.
+
+Separate:
+
+Trainer
+DataLoader
+Model
+Optimizer
+Scheduler
+CheckpointManager
+Evaluator
+Logger
+
+Explain the interfaces between them.
+
+## 11. Checkpointing
+
+Design checkpoints carefully.
+
+A checkpoint should be able to contain:
+
+* model weights
+* optimizer state
+* scheduler state
+* scaler state if required
+* training step
+* epoch
+* random states
+* configuration
+* tokenizer version
+* dataset version
+* code/version metadata
+
+The system must support:
+
+* save
+* load
+* resume
+* best checkpoint
+* latest checkpoint
+* checkpoint validation
+* checkpoint conversion
+
+Design it so future distributed/sharded checkpoints can be supported.
+
+## 12. Evaluation
+
+Do not rely only on training loss.
+
+Create an evaluation framework that can later support:
+
+* validation loss
+* perplexity
+* next-token prediction
+* instruction following
+* question answering
+* summarization
+* reasoning benchmarks
+* coding benchmarks
+* custom internal benchmarks
+
+Make evaluation datasets/configurations modular.
+
+Create a system where a new benchmark can be added without modifying the training engine.
+
+## 13. Inference / Generation
+
+Create a separate inference subsystem.
+
+Support:
+
+* text generation
+* temperature
+* top-k
+* top-p
+* repetition penalty
+* maximum tokens
+* stop tokens
+* streaming generation
+
+Keep inference independent from training.
+
+Design the architecture so it can later support:
+
+* KV cache
+* quantization
+* batching
+* continuous batching
+* multiple GPUs
+* model serving APIs
+* CPU inference
+* GPU inference
+
+## 14. Future Distributed Training
+
+This is extremely important.
+
+The initial implementation may be single-machine, but the architecture must have a migration path toward:
+
+* multi-GPU
+* distributed data parallelism
+* Fully Sharded Data Parallel
+* tensor parallelism
+* pipeline parallelism
+* distributed checkpointing
+* distributed data loading
+
+Explain which technologies/frameworks could eventually be used, for example:
+
+* PyTorch
+* torch.distributed
+* FSDP
+* DeepSpeed
+* Megatron-style parallelism
+
+Do not add complex distributed infrastructure unnecessarily to the first prototype.
+
+Instead, define clean interfaces so it can be added later.
+
+## 15. Memory Efficiency
+
+Design specifically for limited memory.
+
+Explain techniques such as:
+
+* memory-mapped files
+* dataset streaming
+* gradient accumulation
+* gradient checkpointing
+* mixed precision
+* optimizer memory
+* activation memory
+* parameter memory
+* checkpoint sharding
+* CPU offloading
+* quantization for inference
+
+Include a simple memory estimation methodology.
+
+For example, explain approximately how much memory is required for:
+
+parameters
+
+* gradients
+* optimizer states
+* activations
+* temporary buffers
+
+Show why training memory can be several times larger than model parameter size.
+
+## 16. Configuration System
+
+Use configuration files rather than hard-coded settings.
+
+Prefer YAML/TOML/JSON plus command-line overrides.
+
+For example:
+
+configs/
+├── model/
+│   ├── tiny.yaml
+│   ├── small.yaml
+│   └── medium.yaml
+├── training/
+│   ├── local.yaml
+│   └── distributed.yaml
+├── data/
+│   └── default.yaml
+└── inference/
+└── default.yaml
+
+A command should conceptually look like:
+
+python -m fontaine train 
+--config configs/model/tiny.yaml 
+--training-config configs/training/local.yaml
+
+Design a clean configuration hierarchy.
+
+## 17. CLI
+
+Create a future-proof CLI.
+
+Possible commands:
+
+fontaine data validate
+fontaine data prepare
+fontaine tokenizer train
+fontaine tokenizer test
+fontaine model inspect
+fontaine train
+fontaine evaluate
+fontaine generate
+fontaine checkpoint inspect
+fontaine checkpoint convert
+fontaine serve
+
+Explain what each command does.
+
+## 18. Testing
+
+Create a serious testing strategy.
+
+Include:
+
+tests/
+├── unit/
+├── integration/
+├── model/
+├── data/
+├── tokenizer/
+├── training/
+└── inference/
+
+Tests should verify:
+
+* tokenizer correctness
+* tensor shapes
+* attention correctness
+* model forward pass
+* loss calculation
+* gradient flow
+* checkpoint save/load
+* dataset loading
+* generation
+* configuration validation
+
+Include a tiny synthetic dataset so the entire pipeline can be tested quickly.
+
+The model should be capable of overfitting a tiny dataset as a sanity check.
+
+## 19. Experiment Reproducibility
+
+Every experiment should record:
+
+* configuration
+* git commit
+* dataset version
+* tokenizer version
+* model architecture
+* random seed
+* hardware
+* software versions
+* training duration
+* metrics
+* checkpoint paths
+
+Design an experiment directory structure.
+
+Example:
+
+experiments/
+└── 2026-09-19_fontaine_tiny/
+├── config.yaml
+├── metrics.json
+├── logs/
+└── checkpoints/
+
+## 20. Security and Data Governance
+
+Include considerations for:
+
+* untrusted datasets
+* malicious input
+* prompt injection in training data
+* copyrighted data
+* personal information
+* dataset licenses
+* model licenses
+* model provenance
+* checkpoint integrity
+* dependency security
+
+Do not make unsupported claims about legal compliance.
+
+Clearly distinguish engineering practices from legal advice.
+
+## 21. Future Post-Training
+
+Design extension points for:
+
+Pretraining
+→ Supervised Fine-Tuning
+→ Preference Optimization
+→ Evaluation
+→ Deployment
+
+Potential future components:
+
+* instruction tuning
+* supervised fine-tuning
+* preference datasets
+* DPO-style methods
+* reward modeling
+* RL-based post-training
+
+Do not implement all of this in the first version.
+
+Explain how the architecture should allow them to be added later.
+
+## 22. Future Multimodal Architecture
+
+I eventually may want Fontaine to support more than text.
+
+Do not implement multimodality initially, but design extension points for:
+
+Text
+Image
+Audio
+Video
+
+Explain how future encoders could connect to the language model.
+
+For example:
+
+Image Encoder
+Audio Encoder
+Video Encoder
+↓
+Multimodal Projection / Adapter
+↓
+Language Model
+↓
+Text / Multimodal Output
+
+Do not unnecessarily complicate the initial codebase.
+
+## 23. API and Serving
+
+Design future serving architecture.
+
+Potential future architecture:
+
+Client
+→ API Gateway
+→ Authentication
+→ Request Queue
+→ Model Server
+→ Scheduler
+→ GPU Workers
+→ Model
+→ Streaming Response
+
+Initially, a simple local inference API is enough.
+
+Explain how this can evolve into a production inference system.
+
+## 24. Model Registry
+
+Design a future model registry.
+
+It should track:
+
+* model name
+* version
+* architecture
+* parameter count
+* tokenizer
+* dataset
+* training configuration
+* evaluation results
+* checkpoint location
+* status
+* compatibility
+
+For example:
+
+Fontaine-Tiny-v0.1
+Fontaine-Tiny-v0.2
+Fontaine-Small-v1.0
+
+## 25. Important Engineering Principles
+
+Follow these principles:
+
+1. Modular
+2. Configurable
+3. Reproducible
+4. Testable
+5. Observable
+6. Memory-efficient
+7. Hardware-independent where practical
+8. Dataset-independent
+9. Model-size-independent
+10. Backward-compatible configuration/checkpoints where possible
+11. Easy to experiment with
+12. Easy to scale
+13. Avoid premature complexity
+
+Avoid creating a giant monolithic Python file.
+
+Avoid putting training, model definition, data processing, evaluation, and inference into one module.
+
+## 26. Technology Choices
+
+Recommend a practical initial stack.
+
+Consider:
+
+* Python
+* PyTorch
+* Hugging Face ecosystem where useful
+* SentencePiece/tokenizers
+* NumPy
+* YAML/TOML
+* pytest
+* logging
+* optional experiment tracking
+
+For every major dependency, explain:
+
+* why it is used
+* whether it is required
+* whether it creates future lock-in
+* possible alternatives
+
+Keep the first version lightweight.
+
+## 27. Deliverables
+
+Your response must produce all of the following:
+
+### A. Architecture overview
+
+Explain the complete system.
+
+### B. Architecture diagram
+
+Use Mermaid.
+
+### C. Repository tree
+
+Give the complete recommended folder structure.
+
+### D. Directory documentation
+
+Explain every major folder.
+
+### E. Model architecture
+
+Explain every model component.
+
+### F. Configuration examples
+
+Provide realistic example configuration files.
+
+### G. Dataset specification
+
+Define the expected dataset structure.
+
+### H. Training architecture
+
+Explain the training pipeline.
+
+### I. Checkpoint specification
+
+Define checkpoint contents and versioning.
+
+### J. Evaluation architecture
+
+Define how evaluation works.
+
+### K. Inference architecture
+
+Define generation and serving.
+
+### L. 16 GB RAM strategy
+
+Give realistic constraints and optimizations.
+
+### M. Scaling roadmap
+
+Show how Fontaine can evolve from a tiny local model toward distributed large models.
+
+### N. Development roadmap
+
+Break development into phases.
+
+For example:
+
+Phase 0 — Architecture
+Phase 1 — Minimal Transformer
+Phase 2 — Tokenizer + Data Pipeline
+Phase 3 — Training
+Phase 4 — Checkpointing
+Phase 5 — Evaluation
+Phase 6 — Inference
+Phase 7 — Fine-Tuning
+Phase 8 — Multi-GPU
+Phase 9 — Distributed Training
+Phase 10 — Large-Scale Infrastructure
+
+### O. Definition of Done
+
+Define objective criteria for each phase.
+
+## 28. Critical Requirement
+
+The most important requirement is:
+
+**Build small now, but architect for scale.**
+
+Do not claim that a 16 GB RAM computer can train a GPT/Gemini-scale model.
+
+Instead, make the codebase structurally capable of evolving toward larger systems.
+
+The initial model should be intentionally small enough to experiment with locally.
+
+The architecture should make it possible to replace:
+
+* local storage → object storage
+* single GPU → multi-GPU
+* single node → multi-node
+* ordinary checkpoint → sharded checkpoint
+* simple DataLoader → distributed DataLoader
+* local inference → model-serving cluster
+
+without rewriting the entire project.
+
+## 29. Code Quality
+
+If you provide code:
+
+* use type hints
+* use clear names
+* use docstrings
+* use modular classes
+* avoid global state
+* avoid hidden configuration
+* validate configuration
+* handle errors clearly
+* write tests
+* keep functions reasonably small
+* explain non-obvious implementation decisions
+
+Do not dump hundreds of lines of unnecessary code.
+
+First establish the architecture and interfaces.
+
+Then provide the **minimum viable implementation skeleton** that can actually be expanded.
+
+## 30. Important Final Section
+
+End with a section titled:
+
+# "What Fontaine Can Become"
+
+Explain the long-term evolution:
+
+Local Research Model
+→ Small Language Model
+→ Medium Language Model
+→ Multi-GPU Model
+→ Distributed Training System
+→ Large Foundation Model
+→ Multimodal Foundation Model
+→ Production AI Platform
+
+Clearly distinguish:
+
+* what can be built now
+* what requires substantially more compute/data
+* what requires distributed infrastructure
+* what requires a larger engineering team
+
+The goal is not to copy GPT or Gemini.
+
+The goal is to create **Fontaine AI as an independently designed, modular foundation-model platform whose architecture can scale as resources, data, research, and engineering capabilities grow.**
+
+Be technically realistic, avoid marketing language, and prioritize sound engineering architecture over unnecessary complexity.

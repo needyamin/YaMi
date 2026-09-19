@@ -1,0 +1,25 @@
+# Default training setup for the 16 GB RAM / single-machine environment.
+training:
+  run_name: fontaine-tiny
+  experiments_dir: experiments
+  device: auto            # auto | cpu | cuda | mps
+  max_steps: 5000
+  batch_size: 8           # micro-batch per step
+  gradient_accumulation_steps: 4   # effective batch = 32 sequences
+  learning_rate: 0.0003
+  min_learning_rate_ratio: 0.1
+  lr_scheduler: cosine
+  warmup_steps: 100
+  weight_decay: 0.1
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  max_grad_norm: 1.0
+  precision: auto         # auto | fp32 | bf16 | fp16
+  gradient_checkpointing: false
+  eval_interval: 100
+  log_interval: 10
+  checkpoint_interval: 250
+  keep_last_n_checkpoints: 2
+  early_stopping_patience: 0   # 0 = disabled
+  seed: 42
+  deterministic: false

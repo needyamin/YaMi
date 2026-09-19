@@ -1,0 +1,19 @@
+# Fontaine Tiny — the development model: trains in minutes on CPU / 16 GB RAM.
+# vocab_size: auto resolves from the trained tokenizer at train time.
+model:
+  architecture: decoder_transformer
+  vocab_size: auto
+  hidden_size: 256
+  num_layers: 4
+  num_attention_heads: 4
+  num_kv_heads: 2          # grouped-query attention (2 query heads share each KV head)
+  intermediate_size: 768   # ~3x hidden for SwiGLU
+  max_sequence_length: 256
+  rope_theta: 10000.0
+  dropout: 0.0
+  activation: swiglu
+  normalization: rmsnorm
+  norm_eps: 0.00001
+  tie_word_embeddings: true
+  attention_bias: false
+  mlp_bias: false

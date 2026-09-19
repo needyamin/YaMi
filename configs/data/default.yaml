@@ -1,0 +1,15 @@
+# Dataset preparation + loading. Point raw_paths at YOUR data.
+data:
+  raw_paths: []            # e.g. ["datasets/raw/*.txt", "datasets/raw/conversations.jsonl"]
+  output_dir: datasets/prepared
+  manifest_path: null      # set by 'fontaine data prepare'; consumed by training
+  val_fraction: 0.05
+  normalize_unicode: true
+  strip_whitespace: true
+  min_document_chars: 32
+  max_document_chars: 1000000
+  drop_duplicates: true
+  sequence_length: 256     # must be <= model.max_sequence_length
+  shard_size_tokens: 5000000
+  dtype: auto              # uint16 for vocab <= 65536, else uint32
+  seed: 42

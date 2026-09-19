@@ -1,0 +1,5 @@
+# Development / testing dependencies.
+-r requirements.txt
+pytest>=7.4
+tokenizers>=0.15
+ruff>=0.4

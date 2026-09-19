@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fontaine-ai"
+version = "0.1.0"
+description = "Fontaine AI - a modular, config-driven foundation-model platform that starts small (16 GB RAM) and scales toward large language models."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Md. Yamin Hossain" }]
+requires-python = ">=3.10"
+keywords = ["llm", "transformer", "deep-learning", "training", "pytorch"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# Core runtime dependencies. Kept deliberately small; optional extras below.
+dependencies = [
+    "torch>=2.2",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Fast byte-level BPE training/encoding (recommended for real tokenizers).
+bpe = ["tokenizers>=0.15"]
+# Faster, safer checkpoint export format.
+safetensors = ["safetensors>=0.4"]
+dev = [
+    "pytest>=7.4",
+    "tokenizers>=0.15",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+fontaine = "fontaine.cli.main:main"
+
+[project.urls]
+Documentation = "docs/index.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+fontaine = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::UserWarning"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

@@ -1,0 +1,19 @@
+# Fontaine Small — needs a modest GPU (or a lot of patience on CPU).
+# Architectural target: roughly 40-60M parameters with a 8k+ vocab.
+model:
+  architecture: decoder_transformer
+  vocab_size: auto
+  hidden_size: 512
+  num_layers: 8
+  num_attention_heads: 8
+  num_kv_heads: 4
+  intermediate_size: 1408
+  max_sequence_length: 512
+  rope_theta: 10000.0
+  dropout: 0.0
+  activation: swiglu
+  normalization: rmsnorm
+  norm_eps: 0.00001
+  tie_word_embeddings: true
+  attention_bias: false
+  mlp_bias: false

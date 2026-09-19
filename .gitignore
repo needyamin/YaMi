@@ -1,0 +1,33 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+
+# ---- Data, artifacts, and large binaries (NEVER commit these) ----
+datasets/*
+!datasets/README.md
+checkpoints/*
+!checkpoints/README.md
+experiments/*
+!experiments/README.md
+logs/*
+!logs/README.md
+*.bin
+*.pt
+*.safetensors
+*.msgpack
+
+# ---- Environment / IDE ----
+.env
+.idea/
+.vscode/
+.DS_Store

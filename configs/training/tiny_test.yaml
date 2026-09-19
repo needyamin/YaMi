@@ -1,0 +1,25 @@
+# Short smoke-test training schedule (overfits a tiny corpus in ~a minute on CPU).
+training:
+  run_name: fontaine-tiny-smoke
+  experiments_dir: experiments
+  device: auto
+  max_steps: 200
+  batch_size: 8
+  gradient_accumulation_steps: 1
+  learning_rate: 0.001
+  min_learning_rate_ratio: 0.1
+  lr_scheduler: cosine
+  warmup_steps: 10
+  weight_decay: 0.1
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  max_grad_norm: 1.0
+  precision: auto
+  gradient_checkpointing: false
+  eval_interval: 50
+  log_interval: 10
+  checkpoint_interval: 100
+  keep_last_n_checkpoints: 2
+  early_stopping_patience: 0
+  seed: 42
+  deterministic: false
