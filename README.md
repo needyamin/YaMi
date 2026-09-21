@@ -9,11 +9,6 @@ SwiGLU, RMSNorm) with a complete, professional toolchain: streaming data
 pipeline, tokenizer subsystem, training engine, integrity-checked
 checkpointing, registry-based evaluation, KV-cached inference, and a CLI.
 
-> Honest scope: a 16 GB machine cannot train a GPT/Gemini-scale model. What
-> Fontaine guarantees is that the *software* — configs, formats, interfaces —
-> is already the software of the scaled-up system. See
-> [docs/training/memory.md](docs/training/memory.md) for what is and isn't
-> feasible.
 
 ## Architecture at a glance
 
