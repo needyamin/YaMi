@@ -125,8 +125,8 @@ python tools/prepare_codealpaca.py \
 ```
 
 A beginner-friendly, every-step guide (download → convert → prepare →
-train → web playground) lives at [docs/info.html](docs/info.html);
-the Docker deep-dive at [docs/docker_info.html](docs/docker_info.html).
+train → web playground) lives at [https://needyamin.github.io/YaMi/docs/info.html](docs/info.html);
+the Docker deep-dive at [docs/docker_info.html](https://needyamin.github.io/YaMi/docs/docker_info.html).
 
 ## Scaling path
 
