@@ -1,0 +1,37 @@
+# Version control and CI
+.git
+.gitignore
+.github
+
+# Python artifacts
+__pycache__
+*.py[cod]
+.venv
+venv
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.coverage
+
+# Data, models, runs — mounted as volumes at runtime, never baked in
+datasets
+experiments
+checkpoints
+logs
+
+# Docs, tests, host-only tooling
+docs
+tests
+tools
+requirements
+*.md
+!README.md
+
+# Downloads and env
+.env
+*.zip
+*.gz
+*.tar.gz
+*.7z
+*.rar
+read.txt

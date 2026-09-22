@@ -1,6 +1,7 @@
 """Minimal local inference API (development only).
 
 Endpoints:
+- ``GET  /``         -> self-contained web playground (chat UI over /generate)
 - ``GET  /health``   -> {"status": "ok"}
 - ``POST /generate`` -> body: {"prompt": str, "stream": bool, **sampling overrides}
 
@@ -19,11 +20,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from fontaine.inference.engine import Generator
+from fontaine.inference.webui import PLAYGROUND_PAGE
 from fontaine.utils.logging import get_logger
 
 logger = get_logger("inference")
 
-_SAMPLING_FIELDS = {"temperature", "top_k", "top_p", "repetition_penalty", "seed", "stop_sequences"}
+_OVERRIDABLE_FIELDS = {
+    "temperature", "top_k", "top_p", "repetition_penalty", "seed", "max_new_tokens", "stop_sequences",
+}
 
 
 def build_server(generator: Generator, host: str, port: int) -> ThreadingHTTPServer:
@@ -42,7 +46,14 @@ def build_server(generator: Generator, host: str, port: int) -> ThreadingHTTPSer
             self.wfile.write(body)
 
         def do_GET(self) -> None:  # noqa: N802 (http.server API)
-            if self.path == "/health":
+            if self.path in ("/", "/index.html"):
+                body = PLAYGROUND_PAGE.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            elif self.path == "/health":
                 self._json(200, {"status": "ok"})
             else:
                 self._json(404, {"error": "not found"})
@@ -59,7 +70,7 @@ def build_server(generator: Generator, host: str, port: int) -> ThreadingHTTPSer
                     self._json(400, {"error": "'prompt' (non-empty string) is required"})
                     return
                 stream = bool(request.pop("stream", False))
-                overrides = {k: request[k] for k in _SAMPLING_FIELDS if k in request}
+                overrides = {k: request[k] for k in _OVERRIDABLE_FIELDS if k in request}
                 if stream:
                     self._stream_response(generator, prompt, overrides)
                 else:
@@ -95,7 +106,7 @@ def serve(generator: Generator, host: str = "127.0.0.1", port: int = 8321) -> No
     """Run the dev server in the foreground (Ctrl+C to stop)."""
     server = build_server(generator, host, port)
     logger.info("Fontaine dev server listening on http://%s:%d", host, port)
-    logger.info("POST /generate with {\"prompt\": \"...\"}; GET /health to check")
+    logger.info("playground: http://%s:%d/ | POST /generate | GET /health", host, port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

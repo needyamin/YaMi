@@ -1,0 +1,54 @@
+name: fontaine-ai
+
+services:
+  # ---------------------------------------------------------------------------
+  # Web playground + inference API — the default service.
+  #
+  #   docker compose up -d web          http://localhost:8321
+  #
+  # The served checkpoint is chosen on the HOST side via FONTAINE_CHECKPOINT
+  # (see .env.example) — pointing at the container path of a run folder:
+  #   /app/experiments/<run-name>/checkpoints
+  # ---------------------------------------------------------------------------
+  web:
+    build: .
+    image: fontaine-ai:latest
+    container_name: fontaine-web
+    init: true
+    ports:
+      - "${FONTAINE_PORT:-8321}:8321"
+    volumes:
+      # :ro — serving never mutates your trained artifacts
+      - ./experiments:/app/experiments:ro
+      - ./datasets/tokenizer:/app/datasets/tokenizer:ro
+    command: >-
+      serve
+      --checkpoint ${FONTAINE_CHECKPOINT:-/app/experiments/2026-09-22_104709_smoke-codealpaca/checkpoints}
+      --tokenizer-dir /app/datasets/tokenizer
+      --set inference.server_host=0.0.0.0
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # One-off training run inside the same image.
+  #
+  #   docker compose run --rm train
+  #
+  # Writes prepared data + experiments back to the host folders, so the web
+  # service can immediately serve a freshly trained checkpoint.
+  # ---------------------------------------------------------------------------
+  train:
+    profiles: ["train"]
+    image: fontaine-ai:latest
+    container_name: fontaine-train
+    init: true
+    volumes:
+      - ./datasets:/app/datasets
+      - ./experiments:/app/experiments
+      - ./configs:/app/configs:ro
+    command: >-
+      train
+      --model-config /app/configs/model/tiny.yaml
+      --training-config /app/configs/training/local.yaml
+      --data-config /app/configs/data/default.yaml
+      --tokenizer-dir /app/datasets/tokenizer
+      --set data.manifest_path=/app/datasets/prepared/manifest.json

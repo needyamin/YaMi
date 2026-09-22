@@ -26,6 +26,14 @@ logs/*
 *.safetensors
 *.msgpack
 
+# ---- Downloaded dataset archives (keep archives out of the repo, anywhere) ----
+*.zip
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+*.gz
+
 # ---- Environment / IDE ----
 .env
 .idea/
