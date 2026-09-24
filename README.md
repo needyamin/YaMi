@@ -22,7 +22,7 @@ flowchart LR
     F --> G[Trainer<br/>AMP · accumulation · warmup+cosine]
     G --> H[Checkpoints<br/>atomic · hash-sealed]
     G --> I[Evaluation<br/>registry]
-    H --> J[Inference<br/>KV cache · sampling · streaming<br/>+ web playground]
+    H --> J[Inference<br/>KV cache · sampling · streaming<br/>+ Ollama-compatible API]
 ```
 
 Full diagrams and rationale: [docs/architecture/overview.md](docs/architecture/overview.md).
@@ -97,19 +97,30 @@ perplexity 8.5 — see `experiments/*/summary.json`.
 
 ## Docker: train and chat in the browser
 
-The whole stack runs in one CPU container, and `fontaine serve` ships a
-self-contained web playground at `GET /` (multi-turn memory, streaming,
-sampling controls) alongside the JSON API.
+The stack runs in one CPU container plus [Open WebUI](https://github.com/open-webui/open-webui)
+— the open-source Ollama chat interface. `fontaine serve` speaks the
+Ollama API (`/api/chat`, `/api/generate`, `/api/tags`), so any
+Ollama-compatible UI or client connects to your checkpoint with no model
+conversion; the native `/generate` JSON/SSE API stays for tooling.
 
 ```bash
-cp .env.example .env          # pick the checkpoint to serve + host port
-docker compose up -d web      # build + start → http://localhost:8321
-docker compose run --rm train # one training run (writes to host folders)
+cp .env.example .env             # pick the checkpoint to serve + host ports
+docker compose up -d web webui   # build + start → http://localhost:3000
+docker compose run --rm train    # one training run (writes to host folders)
 ```
 
 Weights, tokenizer, and prepared data are bind-mounted, never baked in —
 a new training run needs no rebuild. Full guide:
 [docs/deployment/docker.md](docs/deployment/docker.md).
+
+## Kaggle: train on a free GPU, download the checkpoints
+
+No local GPU? Upload your corpus as a private Kaggle Dataset, import
+`kaggle/train_fontaine_kaggle.ipynb`, and Run All on a T4 — the notebook
+trains the tokenizer, prepares the shards, trains the model with
+`configs/training/kaggle.yaml`, and zips checkpoints + tokenizer into
+`/kaggle/working` for one-click download. Step-by-step:
+[docs/kaggle.md](docs/kaggle.md).
 
 ## Getting data in
 
@@ -133,8 +144,8 @@ the Docker deep-dive at [docs/docker_info.html](https://needyamin.github.io/YaMi
 | Stage | Params | Hardware |
 | --- | --- | --- |
 | Fontaine Tiny | 3–5 M | CPU / 16 GB RAM — **works today** |
-| Fontaine Small | 40–60 M | modest GPU |
-| Fontaine Medium | 130–160 M | 16 GB+ VRAM GPU |
+| Fontaine Small | 40–60 M | modest GPU — free Kaggle T4 |
+| Fontaine Medium | 130–160 M | 16 GB+ VRAM — Kaggle T4/P100 |
 | Fontaine Large → XL | 0.4–4 B | multi-GPU (DDP → FSDP) |
 | Distributed Fontaine | 8 B+ | multi-node, TP/PP, sharded everything |
 
@@ -147,7 +158,8 @@ migration path — see [docs/scaling/roadmap.md](docs/scaling/roadmap.md) and
 
 Source in `src/fontaine/`, configs in `configs/`, tests in `tests/` (92
 tests, CPU-only, minutes), docs in `docs/`, dataset converter gadgets in
-`tools/`. Datasets, checkpoints, experiments, and logs are artifacts — never
+`tools/`, and the Kaggle GPU training notebook in `kaggle/`. Datasets,
+checkpoints, experiments, and logs are artifacts — never
 committed. Full layout contract:
 [docs/architecture/repository-layout.md](docs/architecture/repository-layout.md).
 

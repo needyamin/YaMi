@@ -1,0 +1,1153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YaMi — Rust Migration Roadmap</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <style>
+        body {
+            background: #f8f9fa;
+        }
+
+        .hero {
+            background: #212529;
+            color: white;
+            padding: 70px 0;
+        }
+
+        .hero h1 {
+            font-weight: 700;
+        }
+
+        .phase-card {
+            height: 100%;
+            border: 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,.06);
+        }
+
+        .phase-number {
+            width: 42px;
+            height: 42px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            background: #212529;
+            color: white;
+            font-weight: 700;
+        }
+
+        .architecture {
+            background: #212529;
+            color: #f8f9fa;
+            border-radius: 12px;
+            padding: 25px;
+            overflow-x: auto;
+        }
+
+        pre {
+            margin: 0;
+            white-space: pre-wrap;
+        }
+
+        .section-title {
+            margin-bottom: 30px;
+            font-weight: 700;
+        }
+
+        .badge-rust {
+            background: #dea584;
+            color: #212529;
+        }
+    </style>
+</head>
+
+<body>
+
+<!-- Navbar -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top">
+    <div class="container">
+        <a class="navbar-brand fw-bold" href="#">YaMi</a>
+
+        <button class="navbar-toggler"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav ms-auto">
+                <li class="nav-item">
+                    <a class="nav-link" href="#architecture">Architecture</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#roadmap">Roadmap</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#milestones">Milestones</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#vision">Vision</a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+
+<!-- Hero -->
+<header class="hero">
+    <div class="container">
+        <div class="row align-items-center">
+
+            <div class="col-lg-8">
+                <span class="badge badge-rust mb-3">Rust + LLM Runtime</span>
+
+                <h1 class="display-4">
+                    YaMi Rust Migration Roadmap
+                </h1>
+
+                <p class="lead mt-3">
+                    Gradually evolve YaMi from a Python/PyTorch-based
+                    LLM project into a hardware-independent Rust ML runtime.
+                </p>
+
+                <div class="mt-4">
+                    <a href="#roadmap" class="btn btn-light btn-lg">
+                        View Roadmap
+                    </a>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</header>
+
+
+<!-- Goal -->
+<section class="py-5">
+    <div class="container">
+
+        <h2 class="section-title">Project Goal</h2>
+
+        <div class="row g-4">
+
+            <div class="col-md-6 col-lg-3">
+                <div class="card phase-card p-4">
+                    <h5>Rust Core</h5>
+                    <p class="text-muted mb-0">
+                        Build the core tensor and runtime engine in Rust.
+                    </p>
+                </div>
+            </div>
+
+            <div class="col-md-6 col-lg-3">
+                <div class="card phase-card p-4">
+                    <h5>CPU Backend</h5>
+                    <p class="text-muted mb-0">
+                        Provide an optimized native CPU execution backend.
+                    </p>
+                </div>
+            </div>
+
+            <div class="col-md-6 col-lg-3">
+                <div class="card phase-card p-4">
+                    <h5>Vulkan GPU</h5>
+                    <p class="text-muted mb-0">
+                        Support GPU compute without making CUDA mandatory.
+                    </p>
+                </div>
+            </div>
+
+            <div class="col-md-6 col-lg-3">
+                <div class="card phase-card p-4">
+                    <h5>Resource Control</h5>
+                    <p class="text-muted mb-0">
+                        Control CPU threads, RAM, GPU memory and execution.
+                    </p>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</section>
+
+
+<!-- Architecture -->
+<section id="architecture" class="py-5 bg-white">
+    <div class="container">
+
+        <h2 class="section-title">Target Architecture</h2>
+
+        <div class="architecture">
+<pre>
+                         YaMi
+                           │
+                 ┌─────────┴─────────┐
+                 │                   │
+             Python API            CLI/API
+                 │                   │
+                 └─────────┬─────────┘
+                           │
+                          PyO3
+                           │
+                           ▼
+                  ┌─────────────────┐
+                  │   YaMi Core     │
+                  │      Rust       │
+                  └────────┬────────┘
+                           │
+             ┌─────────────┼─────────────┐
+             │             │             │
+             ▼             ▼             ▼
+          Tensor        Autograd      NN / Graph
+             │             │             │
+             └─────────────┼─────────────┘
+                           │
+                           ▼
+                  Operator Dispatcher
+                           │
+                ┌──────────┼──────────┐
+                │          │          │
+                ▼          ▼          ▼
+               CPU      Vulkan     CUDA*
+                │          │          │
+                └──────────┼──────────┘
+                           │
+                           ▼
+                       Runtime
+                           │
+                    Resource Manager
+                    ├── CPU
+                    ├── RAM
+                    └── GPU
+
+                    * Optional
+</pre>
+        </div>
+
+    </div>
+</section>
+
+
+<!-- Roadmap -->
+<section id="roadmap" class="py-5">
+    <div class="container">
+
+        <h2 class="section-title">Migration Roadmap</h2>
+
+        <div class="row g-4">
+
+
+            <!-- Phase 0 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+                        <span class="phase-number">0</span>
+
+                        <h4 class="mt-3">
+                            Keep Current YaMi Stable
+                        </h4>
+
+                        <p>
+                            Keep the current Python/PyTorch implementation
+                            as the reference implementation.
+                        </p>
+
+                        <ul>
+                            <li>Transformer</li>
+                            <li>Tokenizer</li>
+                            <li>Training</li>
+                            <li>Inference</li>
+                            <li>Checkpointing</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 1 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+                        <span class="phase-number">1</span>
+
+                        <h4 class="mt-3">
+                            Create Rust Workspace
+                        </h4>
+
+                        <p>
+                            Add a Rust workspace without breaking the
+                            existing Python project.
+                        </p>
+
+<pre><code>rust/
+├── yami-core/
+├── yami-cpu/
+├── yami-runtime/
+├── yami-vulkan/
+└── yami-python/</code></pre>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 2 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+                        <span class="phase-number">2</span>
+
+                        <h4 class="mt-3">
+                            Build YaMi Tensor
+                        </h4>
+
+                        <p>
+                            Create the fundamental Tensor abstraction.
+                        </p>
+
+                        <ul>
+                            <li>Shape</li>
+                            <li>Strides</li>
+                            <li>DType</li>
+                            <li>Device</li>
+                            <li>Memory pointer</li>
+                            <li>Layout</li>
+                        </ul>
+
+<pre><code>let a = Tensor::zeros([2, 3]);
+let b = Tensor::ones([2, 3]);
+let c = &a + &b;</code></pre>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 3 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">3</span>
+
+                        <h4 class="mt-3">
+                            Shape &amp; Stride System
+                        </h4>
+
+                        <ul>
+                            <li>Reshape</li>
+                            <li>View</li>
+                            <li>Transpose</li>
+                            <li>Slice</li>
+                            <li>Contiguous detection</li>
+                            <li>Memory layout</li>
+                        </ul>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 4 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">4</span>
+
+                        <h4 class="mt-3">
+                            Memory Manager
+                        </h4>
+
+                        <p>
+                            Build a dedicated memory system for YaMi.
+                        </p>
+
+                        <ul>
+                            <li>CPU allocator</li>
+                            <li>Memory pool</li>
+                            <li>Allocation tracking</li>
+                            <li>Memory reuse</li>
+                            <li>Memory limits</li>
+                            <li>Memory statistics</li>
+                        </ul>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 5 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">5</span>
+
+                        <h4 class="mt-3">
+                            CPU Backend
+                        </h4>
+
+                        <p>
+                            Make CPU the first native YaMi backend.
+                        </p>
+
+                        <ul>
+                            <li>Elementwise operations</li>
+                            <li>Matrix multiplication</li>
+                            <li>Softmax</li>
+                            <li>RMSNorm</li>
+                            <li>SIMD</li>
+                            <li>Multithreading</li>
+                        </ul>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 6 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">6</span>
+
+                        <h4 class="mt-3">
+                            Operator Dispatcher
+                        </h4>
+
+<pre><code>matmul(A, B)
+     │
+     ▼
+Operator Dispatcher
+     │
+ ┌───┼────┐
+ ▼   ▼    ▼
+CPU Vulkan CUDA</code></pre>
+
+                        <p class="mt-3 mb-0">
+                            The model should not know which hardware
+                            backend executes an operation.
+                        </p>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 7 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">7</span>
+
+                        <h4 class="mt-3">
+                            Python Bindings
+                        </h4>
+
+                        <p>
+                            Connect Rust with Python using PyO3.
+                        </p>
+
+<pre><code>Python
+   ↓
+PyO3
+   ↓
+Rust
+   ↓
+YaMi Tensor
+   ↓
+YaMi Runtime</code></pre>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 8 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">8</span>
+
+                        <h4 class="mt-3">
+                            Move Transformer to YaMi Tensor
+                        </h4>
+
+                        <ul>
+                            <li>Embedding</li>
+                            <li>RMSNorm</li>
+                            <li>RoPE</li>
+                            <li>Grouped Query Attention</li>
+                            <li>SwiGLU</li>
+                            <li>LM Head</li>
+                        </ul>
+
+                        <p>
+                            Replace PyTorch Tensor operations with
+                            YaMi Tensor operations.
+                        </p>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 9 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">9</span>
+
+                        <h4 class="mt-3">
+                            Autograd
+                        </h4>
+
+                        <p>
+                            Build automatic differentiation in Rust.
+                        </p>
+
+<pre><code>x
+ ↓
+matmul
+ ↓
+RMSNorm
+ ↓
+loss
+ ↓
+backward()</code></pre>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 10 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">10</span>
+
+                        <h4 class="mt-3">
+                            YaMi NN Module System
+                        </h4>
+
+<pre><code>Module
+├── parameters
+├── buffers
+├── children
+└── forward()</code></pre>
+
+                        <p class="mt-3">
+                            Implement Linear, Embedding, RMSNorm,
+                            Attention, SwiGLU and Transformer modules.
+                        </p>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 11 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">11</span>
+
+                        <h4 class="mt-3">
+                            Optimizer
+                        </h4>
+
+                        <ul>
+                            <li>SGD</li>
+                            <li>Adam</li>
+                            <li>AdamW</li>
+                            <li>Gradient clipping</li>
+                            <li>Weight decay</li>
+                            <li>Learning-rate scheduler</li>
+                        </ul>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 12 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">12</span>
+
+                        <h4 class="mt-3">
+                            Model Serialization
+                        </h4>
+
+<pre><code>model.yami
+
+├── Model metadata
+├── Architecture
+├── Tensor metadata
+├── Weights
+├── DType
+└── Configuration</code></pre>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 13 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">13</span>
+
+                        <h4 class="mt-3">
+                            Rust Inference Engine
+                        </h4>
+
+<pre><code>Prompt
+  ↓
+Tokenizer
+  ↓
+Token IDs
+  ↓
+Transformer
+  ↓
+Logits
+  ↓
+Sampling
+  ↓
+Next Token</code></pre>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 14 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">14</span>
+
+                        <h4 class="mt-3">
+                            KV Cache
+                        </h4>
+
+                        <p>
+                            Add efficient autoregressive inference
+                            with persistent attention keys and values.
+                        </p>
+
+<pre><code>Attention
+├── Q
+├── K → KV Cache
+└── V → KV Cache</code></pre>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 15 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">15</span>
+
+                        <h4 class="mt-3">
+                            Sampling Engine
+                        </h4>
+
+                        <ul>
+                            <li>Greedy</li>
+                            <li>Temperature</li>
+                            <li>Top-K</li>
+                            <li>Top-P</li>
+                            <li>Repetition penalty</li>
+                            <li>Stop tokens</li>
+                        </ul>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 16 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">16</span>
+
+                        <h4 class="mt-3">
+                            Vulkan Backend
+                        </h4>
+
+<pre><code>YaMi Tensor
+     ↓
+Operator Dispatcher
+     ↓
+Vulkan Backend
+     ↓
+Vulkan Compute
+     ↓
+GPU</code></pre>
+
+                        <p class="mt-3">
+                            Start with simple kernels, then move toward
+                            Transformer-specific GPU kernels.
+                        </p>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 17 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">17</span>
+
+                        <h4 class="mt-3">
+                            GPU Memory Manager
+                        </h4>
+
+                        <ul>
+                            <li>GPU allocation</li>
+                            <li>Buffer management</li>
+                            <li>Memory pooling</li>
+                            <li>Staging buffers</li>
+                            <li>Memory reuse</li>
+                            <li>VRAM statistics</li>
+                        </ul>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 18 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">18</span>
+
+                        <h4 class="mt-3">
+                            Resource Manager
+                        </h4>
+
+<pre><code>Resource Manager
+├── CPU
+│   ├── Threads
+│   └── Affinity
+│
+├── RAM
+│   ├── Limits
+│   └── Allocation
+│
+└── GPU
+    ├── VRAM
+    ├── Queues
+    └── Memory</code></pre>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 19 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">19</span>
+
+                        <h4 class="mt-3">
+                            Device Abstraction
+                        </h4>
+
+<pre><code>enum Device {
+    CPU,
+    VulkanGpu,
+    CudaGpu,
+}</code></pre>
+
+                        <p class="mt-3">
+                            Keep model code independent from hardware.
+                        </p>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 20 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">20</span>
+
+                        <h4 class="mt-3">
+                            Quantization
+                        </h4>
+
+                        <ul>
+                            <li>FP16</li>
+                            <li>BF16</li>
+                            <li>INT8</li>
+                            <li>INT4</li>
+                        </ul>
+
+                        <p>
+                            Start with inference-only quantization.
+                        </p>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 21 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">21</span>
+
+                        <h4 class="mt-3">
+                            Memory-Aware Inference
+                        </h4>
+
+<pre><code>Model Weights
+     +
+KV Cache
+     +
+Activations
+     +
+Temporary Buffers
+     =
+Total Memory</code></pre>
+
+                        <p class="mt-3">
+                            Allow intelligent CPU RAM ↔ GPU VRAM
+                            movement when necessary.
+                        </p>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 22 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">22</span>
+
+                        <h4 class="mt-3">
+                            PyTorch Compatibility Layer
+                        </h4>
+
+<pre><code>PyTorch Model
+      ↓
+YaMi Converter
+      ↓
+YaMi Model
+      ↓
+model.yami</code></pre>
+
+                        <p class="mt-3">
+                            Continue using PyTorch for training while
+                            deploying models through YaMi.
+                        </p>
+
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Phase 23 -->
+            <div class="col-lg-6">
+                <div class="card phase-card">
+                    <div class="card-body p-4">
+
+                        <span class="phase-number">23</span>
+
+                        <h4 class="mt-3">
+                            PyTorch-Free Training
+                        </h4>
+
+<pre><code>Dataset
+   ↓
+Tokenizer
+   ↓
+YaMi DataLoader
+   ↓
+YaMi Tensor
+   ↓
+YaMi Autograd
+   ↓
+YaMi Optimizer
+   ↓
+YaMi Checkpoint</code></pre>
+
+                    </div>
+                </div>
+            </div>
+
+
+        </div>
+    </div>
+</section>
+
+
+<!-- Milestones -->
+<section id="milestones" class="py-5 bg-white">
+    <div class="container">
+
+        <h2 class="section-title">
+            Key Milestones
+        </h2>
+
+        <div class="row g-4">
+
+            <div class="col-md-4">
+                <div class="card phase-card p-4">
+                    <h4>Milestone 1</h4>
+
+                    <p>
+                        Run a tiny Transformer completely through
+                        the Rust CPU runtime.
+                    </p>
+
+<pre><code>Tokenizer
+   ↓
+YaMi Tensor
+   ↓
+Transformer
+   ↓
+CPU
+   ↓
+Generate</code></pre>
+
+                </div>
+            </div>
+
+
+            <div class="col-md-4">
+                <div class="card phase-card p-4">
+                    <h4>Milestone 2</h4>
+
+                    <p>
+                        Run the same model through CPU and Vulkan
+                        without changing the Transformer architecture.
+                    </p>
+
+<pre><code>Model
+  ↓
+YaMi Runtime
+  ├── CPU
+  └── Vulkan</code></pre>
+
+                </div>
+            </div>
+
+
+            <div class="col-md-4">
+                <div class="card phase-card p-4">
+                    <h4>Milestone 3</h4>
+
+                    <p>
+                        Control execution resources from YaMi.
+                    </p>
+
+<pre><code>yami run model.yami \
+  --device vulkan \
+  --cpu-threads 8 \
+  --ram-limit 8G \
+  --gpu-memory-limit 4G</code></pre>
+
+                </div>
+            </div>
+
+        </div>
+    </div>
+</section>
+
+
+<!-- Development Order -->
+<section class="py-5">
+    <div class="container">
+
+        <h2 class="section-title">
+            Recommended Development Order
+        </h2>
+
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
+
+                <div class="row">
+
+                    <div class="col-md-6">
+                        <ol>
+                            <li>Rust workspace</li>
+                            <li>Tensor</li>
+                            <li>Shape / Stride</li>
+                            <li>CPU memory allocator</li>
+                            <li>Basic operators</li>
+                            <li>CPU backend</li>
+                            <li>Operator dispatcher</li>
+                            <li>PyO3 bindings</li>
+                            <li>Python ↔ Rust Tensor</li>
+                            <li>Linear layer</li>
+                            <li>RMSNorm</li>
+                            <li>RoPE</li>
+                            <li>Attention</li>
+                            <li>SwiGLU</li>
+                            <li>Transformer block</li>
+                        </ol>
+                    </div>
+
+                    <div class="col-md-6">
+                        <ol start="16">
+                            <li>Full Transformer</li>
+                            <li>Model serialization</li>
+                            <li>Inference engine</li>
+                            <li>KV cache</li>
+                            <li>Sampling</li>
+                            <li>Vulkan backend</li>
+                            <li>GPU memory manager</li>
+                            <li>Resource manager</li>
+                            <li>Quantization</li>
+                            <li>Autograd</li>
+                            <li>Optimizer</li>
+                            <li>Training engine</li>
+                            <li>PyTorch converter</li>
+                            <li>PyTorch-free training</li>
+                            <li>Distributed execution</li>
+                        </ol>
+                    </div>
+
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+</section>
+
+
+<!-- Vision -->
+<section id="vision" class="py-5 bg-dark text-white">
+    <div class="container">
+
+        <h2 class="section-title">
+            Long-Term Vision
+        </h2>
+
+        <div class="architecture">
+
+<pre>
+                     YaMi
+                       │
+              ┌────────┴────────┐
+              │                 │
+          Python API          CLI/API
+              │                 │
+              └────────┬────────┘
+                       ↓
+                 PyO3 / FFI
+                       ↓
+                YaMi Core (Rust)
+                       │
+              ┌────────┼────────┐
+              │        │        │
+           Tensor   Autograd    NN
+              │        │        │
+              └────────┼────────┘
+                       ↓
+               Operator Dispatcher
+                       │
+              ┌────────┼────────┐
+              ↓        ↓        ↓
+             CPU    Vulkan    CUDA*
+              │        │        │
+              └────────┼────────┘
+                       ↓
+                    Runtime
+                       │
+               Resource Manager
+                 ├── CPU
+                 ├── RAM
+                 └── GPU
+
+              * Optional backend
+</pre>
+
+        </div>
+
+        <div class="mt-5">
+
+            <h4>Core Principle</h4>
+
+            <p class="lead">
+                Do not rewrite everything at once.
+                Replace one layer at a time.
+            </p>
+
+            <p>
+                Every Rust component should be tested against the
+                existing PyTorch implementation before moving to
+                the next layer.
+            </p>
+
+        </div>
+
+    </div>
+</section>
+
+
+<!-- Footer -->
+<footer class="py-4 bg-black text-white">
+    <div class="container text-center">
+
+        <p class="mb-1">
+            <strong>YaMi</strong> — Rust-based ML / LLM Runtime
+        </p>
+
+        <small class="text-secondary">
+            Python for high-level APIs. Rust for the core.
+            CPU and Vulkan first. CUDA optional.
+        </small>
+
+    </div>
+</footer>
+
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+</body>
+</html>

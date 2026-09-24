@@ -1,0 +1,36 @@
+# Training on Kaggle notebooks (free GPU: T4 x2 / P100, 30 GPU-hours/week).
+#
+# Used by kaggle/train_fontaine_kaggle.ipynb — see docs/kaggle.md.
+#
+# device/precision "auto" resolves per hardware: bf16 on bf16-capable GPUs
+# (A100), fp16 + GradScaler on T4/P100, fp32 on the free CPU tier.
+#
+# Sizing guide (CodeAlpaca-20k-scale corpora):
+#   tiny    (4L/256h,  seq 256): minutes on a T4 — batch 64 is comfortable
+#   small   (8L/512h,  seq 512): ~1-2 h on a T4  — batch 64 fits 16 GB VRAM
+#   medium (12L/768h, seq 1024): several hours    — set batch_size 32 and
+#                                gradient_checkpointing true if memory is tight
+training:
+  run_name: fontaine-kaggle
+  experiments_dir: experiments
+  device: auto
+  max_steps: 20000
+  batch_size: 64
+  gradient_accumulation_steps: 1   # effective batch = 64 sequences
+  learning_rate: 0.0003
+  min_learning_rate_ratio: 0.1
+  lr_scheduler: cosine
+  warmup_steps: 200
+  weight_decay: 0.1
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  max_grad_norm: 1.0
+  precision: auto
+  gradient_checkpointing: false
+  eval_interval: 500
+  log_interval: 25
+  checkpoint_interval: 2000
+  keep_last_n_checkpoints: 2   # /kaggle/working persists max ~20 GB
+  early_stopping_patience: 0   # 0 = disabled
+  seed: 42
+  deterministic: false

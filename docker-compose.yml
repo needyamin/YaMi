@@ -2,9 +2,10 @@ name: fontaine-ai
 
 services:
   # ---------------------------------------------------------------------------
-  # Web playground + inference API — the default service.
+  # Inference API — speaks the Ollama API so off-the-shelf chat UIs connect.
   #
-  #   docker compose up -d web          http://localhost:8321
+  #   docker compose up -d web webui     API: http://localhost:8321
+  #                                      UI:  http://localhost:3000 (Open WebUI)
   #
   # The served checkpoint is chosen on the HOST side via FONTAINE_CHECKPOINT
   # (see .env.example) — pointing at the container path of a run folder:
@@ -26,6 +27,29 @@ services:
       --checkpoint ${FONTAINE_CHECKPOINT:-/app/experiments/2026-09-22_104709_smoke-codealpaca/checkpoints}
       --tokenizer-dir /app/datasets/tokenizer
       --set inference.server_host=0.0.0.0
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Open WebUI — the ready-made open-source Ollama chat interface.
+  #
+  # Talks to the `web` service over the Ollama API; the served checkpoint
+  # shows up in its model picker. First start pulls a large image and the UI
+  # needs a minute to boot; create a local account on first visit.
+  # ---------------------------------------------------------------------------
+  webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: fontaine-webui
+    init: true
+    ports:
+      - "${WEBUI_PORT:-3000}:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://web:8321
+      - ENABLE_OPENAI_API=false
+      - WEBUI_AUTH=false   # local dev: skip the sign-up wall
+    volumes:
+      - open-webui:/app/backend/data
+    depends_on:
+      - web
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
@@ -52,3 +76,6 @@ services:
       --data-config /app/configs/data/default.yaml
       --tokenizer-dir /app/datasets/tokenizer
       --set data.manifest_path=/app/datasets/prepared/manifest.json
+
+volumes:
+  open-webui:

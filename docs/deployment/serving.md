@@ -2,12 +2,35 @@
 
 ## Today: local dev API
 
-`fontaine serve` (stdlib-only) exposes `/generate` (JSON + SSE streaming) and
-`/health`. Contract:
+`fontaine serve` (stdlib-only) exposes two API families.
+
+**Ollama-compatible** — lets off-the-shelf open-source chat UIs (Open WebUI
+and any other Ollama client) connect to a Fontaine checkpoint directly, with
+no model conversion. Streams are NDJSON (one JSON object per line), per the
+Ollama API contract:
 
 ```
-POST /generate   {"prompt": "...", "stream": true, "temperature": 0.7}
-→ data: {"delta": "..."} × N      (stream)
+GET  /api/version   → {"version": "..."}
+GET  /api/tags      → {"models": [{"name": "<run>", "details": {...}}]}
+POST /api/show      → model metadata (template, parameter count)
+POST /api/chat      {"messages": [{"role": "user", "content": "..."}],
+                      "stream": true, "options": {"temperature": 0.7}}
+→ {"message": {"role": "assistant", "content": "..."}, "done": false} × N
+→ {"message": {"content": ""}, "done_reason": "stop", "done": true, ...}
+```
+
+Chat is stateless per request, like real Ollama: the client sends the full
+history; the server renders it through the Alpaca-style template in
+`fontaine.inference.chat_template` (matching the CodeAlpaca-style training
+data). `options` maps onto the engine's sampling config (`num_predict` →
+`max_new_tokens`, `repeat_penalty` → `repetition_penalty`, ...).
+
+**Fontaine-native** — the original contract, kept for tooling and tests:
+
+```
+GET  /health        → {"status": "ok"}
+POST /generate      {"prompt": "...", "stream": true, "temperature": 0.7}
+→ data: {"delta": "..."} × N      (SSE stream)
 → {"text": "..."}                 (non-stream)
 ```
 

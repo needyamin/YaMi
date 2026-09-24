@@ -34,6 +34,10 @@ logs/*
 *.rar
 *.gz
 
+# ---- Kaggle (credential + notebook junk; never commit kaggle.json) ----
+kaggle.json
+.ipynb_checkpoints/
+
 # ---- Environment / IDE ----
 .env
 .idea/

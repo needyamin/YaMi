@@ -411,11 +411,16 @@ def cmd_checkpoint_convert(args: argparse.Namespace) -> int:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
-    from fontaine.inference import load_generator, serve
+    from fontaine.inference import infer_model_name, load_generator, serve
 
     config = _load(args)
     generator = load_generator(args.checkpoint, args.tokenizer_dir, config.inference, device=args.device)
-    serve(generator, host=config.inference.server_host, port=config.inference.server_port)
+    serve(
+        generator,
+        host=config.inference.server_host,
+        port=config.inference.server_port,
+        model_name=infer_model_name(args.checkpoint),
+    )
     return 0
 
 
