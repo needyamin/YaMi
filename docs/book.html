@@ -1856,8 +1856,8 @@ p code, li code, td code { background: var(--fx-code-bg); border: 1px solid var(
       <tr><td>attention heads (query / KV)</td><td>4 / 2 (GQA)</td><td>8 / 4 (GQA)</td><td>12 / 4 (GQA)</td></tr>
       <tr><td>context window</td><td>256 tokens</td><td>512</td><td>1024</td></tr>
       <tr><td>FFN inner size</td><td>768</td><td>1408</td><td>2048</td></tr>
-      <tr><td>approx. parameters</td><td>~3–5 M</td><td>~28 M</td><td>~82 M</td></tr>
-      <tr><td>trainable on 16 GB machine?</td><td>easily (CPU ok)</td><td>yes</td><td>tight; GPU preferred</td></tr>
+      <tr><td>approx. parameters</td><td>~5.2 M</td><td>~28 M</td><td>~82 M</td></tr>
+      <tr><td>trainable on 16 GB machine?</td><td>easily (CPU ok)</td><td>yes (~0.8 GB)</td><td>fits in RAM; GPU preferred</td></tr>
     </tbody>
   </table></div>
   <p>The lesson hiding in this table: <strong>Fontaine Tiny, Small, and Medium are the same program with
@@ -1969,7 +1969,7 @@ p code, li code, td code { background: var(--fx-code-bg); border: 1px solid var(
     <div class="vs-card good">
       <h5><i class="bi bi-check-circle"></i> Realistic on 16 GB</h5>
       <ul>
-        <li>train Fontaine Tiny (3–5 M) comfortably — CPU alone suffices</li>
+        <li>train Fontaine Tiny (~5.2 M) comfortably — CPU alone suffices</li>
         <li>train Fontaine Small (~28 M) — CPU patiently, GPU quickly</li>
         <li>push toward Medium (~82 M) with the techniques below, preferably on a GPU</li>
         <li>preprocess datasets <em>far larger than RAM</em> (the pipeline streams and memory-maps)</li>
@@ -2853,7 +2853,7 @@ p code, li code, td code { background: var(--fx-code-bg); border: 1px solid var(
 
   <figure class="fx-diagram">
     <div class="flow">
-      <div class="fnode accent">Fontaine Tiny &middot; ~3–5 M params</div>
+      <div class="fnode accent">Fontaine Tiny &middot; ~5.2 M params</div>
       <div class="fnote mb-2">runs on your 16 GB machine, CPU ok — the learning model</div>
       <div class="farrow">&#9660;</div>
       <div class="fnode">Fontaine Small &middot; ~28 M params</div>

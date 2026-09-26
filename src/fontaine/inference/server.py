@@ -29,11 +29,18 @@ from pathlib import Path
 from typing import Any
 
 from fontaine import __version__
-from fontaine.inference.chat_template import TEMPLATE_DESCRIPTION, build_chat_prompt
+from fontaine.inference.chat_template import (
+    CHAT_STOP_SEQUENCES,
+    TEMPLATE_DESCRIPTION,
+    build_chat_prompt,
+)
 from fontaine.inference.engine import Generator
 from fontaine.utils.logging import get_logger
 
 logger = get_logger("inference")
+
+# Product name shown in chat UIs, the same role as "Gemini", "GLM", or "Grok".
+DEFAULT_MODEL_NAME = "Yami v1.0"
 
 _OVERRIDABLE_FIELDS = {
     "temperature", "top_k", "top_p", "repetition_penalty", "seed", "max_new_tokens", "stop_sequences",
@@ -70,31 +77,45 @@ def _ollama_overrides(options: Any) -> dict[str, Any]:
     """Translate Ollama request ``options`` into engine sampling overrides."""
     if not isinstance(options, dict):
         return {}
-    overrides = {
-        fontaine_key: options[ollama_key]
-        for ollama_key, fontaine_key in _OLLAMA_OPTION_MAP.items()
-        if ollama_key in options
-    }
+    overrides: dict[str, Any] = {}
+    for ollama_key, fontaine_key in _OLLAMA_OPTION_MAP.items():
+        if ollama_key not in options:
+            continue
+        value = options[ollama_key]
+        if ollama_key == "stop" and isinstance(value, str):
+            value = [value]
+        overrides[fontaine_key] = value
     unsupported = set(options) - set(_OLLAMA_OPTION_MAP)
     if unsupported:
         logger.debug("ignoring unsupported Ollama options: %s", sorted(unsupported))
     return overrides
 
 
+def _with_chat_stops(overrides: dict[str, Any]) -> dict[str, Any]:
+    """Use the Alpaca turn markers as stops unless the client sent its own."""
+    if overrides.get("stop_sequences"):
+        return overrides
+    return {**overrides, "stop_sequences": list(CHAT_STOP_SEQUENCES)}
+
+
 def _now_stamp() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def build_server(generator: Generator, host: str, port: int, model_name: str = "fontaine") -> ThreadingHTTPServer:
+def build_server(
+    generator: Generator, host: str, port: int, model_name: str = DEFAULT_MODEL_NAME
+) -> ThreadingHTTPServer:
     """Create (but do not start) the development HTTP server."""
-    parameters = sum(p.numel() for p in generator.model.parameters())
+    parameters = generator.model.num_parameters()
+    active_parameters = generator.model.num_active_parameters()
     size_bytes = sum(p.numel() * p.element_size() for p in generator.model.parameters())
     digest = "sha256:" + hashlib.sha256(f"{model_name}:{parameters}".encode()).hexdigest()[:12]
     details = {
         "format": "fontaine",
-        "family": "fontaine",
-        "families": ["fontaine"],
+        "family": "Yami",
+        "families": ["Yami"],
         "parameter_size": f"{parameters / 1e6:.1f}M",
+        "active_parameter_size": f"{active_parameters / 1e6:.1f}M",
         "quantization_level": "F32",
     }
     model_entry = {
@@ -118,23 +139,37 @@ def build_server(generator: Generator, host: str, port: int, model_name: str = "
             self.end_headers()
             self.wfile.write(body)
 
+        def _route(self) -> str:
+            return self.path.split("?", 1)[0]
+
         def do_GET(self) -> None:  # noqa: N802 (http.server API)
-            if self.path in ("/", "/index.html"):
+            path = self._route()
+            if path in ("/", "/index.html"):
                 self._json(200, {
                     "status": "ok",
                     "model": model_name,
                     "parameter_count": parameters,
+                    "active_parameter_count": active_parameters,
                     "endpoints": {
-                        "ollama": ["/api/version", "/api/tags", "/api/show", "/api/chat", "/api/generate"],
+                        "ollama": [
+                            "/api/version",
+                            "/api/tags",
+                            "/api/ps",
+                            "/api/show",
+                            "/api/chat",
+                            "/api/generate",
+                        ],
                         "native": ["/generate", "/health"],
                     },
                     "ui": "Point an Ollama-compatible UI (e.g. Open WebUI) at this server.",
                 })
-            elif self.path == "/health":
+            elif path == "/health":
                 self._json(200, {"status": "ok"})
-            elif self.path == "/api/version":
+            elif path == "/api/version":
                 self._json(200, {"version": __version__})
-            elif self.path == "/api/tags":
+            elif path == "/api/tags":
+                self._json(200, {"models": [model_entry]})
+            elif path == "/api/ps":
                 self._json(200, {"models": [model_entry]})
             else:
                 self._json(404, {"error": "not found"})
@@ -145,22 +180,25 @@ def build_server(generator: Generator, host: str, port: int, model_name: str = "
                 request = json.loads(self.rfile.read(length) or b"{}")
                 if not isinstance(request, dict):
                     raise ValueError("request body must be a JSON object")
-                if self.path == "/generate":
+                path = self._route()
+                if path == "/generate":
                     self._native_generate(request)
-                elif self.path == "/api/chat":
+                elif path == "/api/chat":
                     self._ollama_chat(request)
-                elif self.path == "/api/generate":
+                elif path == "/api/generate":
                     self._ollama_generate(request)
-                elif self.path == "/api/show":
+                elif path == "/api/show":
                     self._json(200, {
                         "license": "",
-                        "modelfile": "",
+                        "modelfile": f"# {model_name}\n",
                         "parameters": "",
                         "template": TEMPLATE_DESCRIPTION,
                         "details": details,
+                        "model": model_name,
                         "model_info": {
-                            "general.architecture": "fontaine",
+                            "general.architecture": generator.model.config.architecture,
                             "general.parameter_count": parameters,
+                            "general.active_parameter_count": active_parameters,
                         },
                     })
                 else:
@@ -206,7 +244,7 @@ def build_server(generator: Generator, host: str, port: int, model_name: str = "
         # -- Ollama-compatible -------------------------------------------------
 
         def _ollama_chat(self, request: dict[str, Any]) -> None:
-            overrides = _ollama_overrides(request.get("options"))
+            overrides = _with_chat_stops(_ollama_overrides(request.get("options")))
             prompt = build_chat_prompt(request.get("messages"))
             if request.get("stream", True):
                 self._ndjson_generation(prompt, overrides, mode="chat")
@@ -289,7 +327,9 @@ def build_server(generator: Generator, host: str, port: int, model_name: str = "
     return server
 
 
-def serve(generator: Generator, host: str = "127.0.0.1", port: int = 8321, model_name: str = "fontaine") -> None:
+def serve(
+    generator: Generator, host: str = "127.0.0.1", port: int = 8321, model_name: str = DEFAULT_MODEL_NAME
+) -> None:
     """Run the dev server in the foreground (Ctrl+C to stop)."""
     server = build_server(generator, host, port, model_name=model_name)
     logger.info("Fontaine dev server listening on http://%s:%d (model: %s)", host, port, model_name)

@@ -5,14 +5,21 @@
 Architectural targets — not promises that any size trains on the initial
 16 GB machine.
 
-| Stage | Params (≈) | hidden × layers | Context | VRAM to *train* (bf16, est.) | Hardware tier |
+| Stage | Params (≈) | hidden × layers | Context | Train state before activations | Hardware tier |
 | --- | --- | --- | --- | --- | --- |
-| Fontaine Tiny | 3–5 M | 256 × 4 | 256 | < 1 GB | CPU / any GPU — **today** |
-| Fontaine Small | 40–60 M | 512 × 8 | 512 | 4–8 GB | modest GPU |
-| Fontaine Medium | 130–160 M | 768 × 12 | 1024 | 16–32 GB | 16 GB+ GPU + offload/ckpt |
+| Fontaine Tiny | ~5.2 M dense | 256 × 4 | 256 | ~80 MB | CPU / any GPU — **today** |
+| Fontaine Small | ~28 M dense | 512 × 8 | 512 | ~0.4 GB | modest GPU |
+| Fontaine Medium | ~82 M dense | 768 × 12 | 1024 | ~1.2 GB | free GPU (Kaggle T4) |
+| Coding Low | 5.7 M active / 22 M total | 256 × 6, 8 experts top-1 | 512 | ~0.3 GB | laptop CPU, 16 GB RAM |
+| Coding Mid | 39 M active / 114 M total | 512 × 8, 8 experts top-2 | 1024 | ~1.8 GB | desktop CPU or free GPU |
+| Coding High | 129 M active / 384 M total | 768 × 12, 8 experts top-2 | 2048 | ~6 GB | GPU to train; workstation CPU to run |
 | Fontaine Large | 400–700 M | 1024 × 24 | 2048 | 40–80 GB | single A100/H100 class |
 | Fontaine XL | 1–4 B | 2048 × 24–32 | 4096 | multi-GPU | 4–8 GPUs, FSDP/ZeRO |
 | Distributed Fontaine | 8–70 B+ | 4096–8192 × 32–80 | 8k–128k | cluster | multi-node FSDP + TP/PP |
+
+Dense rows assume an 8k vocabulary. Coding rows are `moe_decoder`: total
+parameters count every expert (that is what AdamW stores); active parameters
+are what one token multiplies. `fontaine model inspect` prints both.
 
 Context lengths assume RoPE theta scaling plus training-data length mix.
 

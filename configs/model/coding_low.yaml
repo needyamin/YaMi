@@ -1,0 +1,25 @@
+# Coding Low — laptop CPU, 16 GB RAM, interactive chat.
+# About 5.7M active / 22M total parameters at vocab 8192.
+# Train with data.sequence_length=512 (must be <= max_sequence_length).
+# Set vocab_size: auto to adopt a trained tokenizer; the counts above assume 8192.
+model:
+  architecture: moe_decoder
+  cpu_tier: "low — laptop CPU, 16 GB RAM, interactive coding chat"
+  vocab_size: 8192
+  hidden_size: 256
+  num_layers: 6
+  num_attention_heads: 4
+  num_kv_heads: 2
+  intermediate_size: 512
+  num_experts: 8
+  num_experts_per_token: 1
+  moe_aux_loss_coef: 0.01
+  max_sequence_length: 512
+  rope_theta: 10000.0
+  dropout: 0.0
+  activation: swiglu
+  normalization: rmsnorm
+  norm_eps: 0.00001
+  tie_word_embeddings: true
+  attention_bias: false
+  mlp_bias: false

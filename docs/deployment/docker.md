@@ -22,10 +22,11 @@ docker compose up -d web webui   # first start pulls ~1 GB + the Open WebUI imag
 ```
 
 Open **http://localhost:3000** — Open WebUI, the open-source Ollama-style
-chat interface. Your checkpoint appears in the model picker; type an
-instruction and the answer streams back. (The `web` service speaks the
-Ollama API at http://localhost:8321 — any Ollama-compatible UI or client can
-connect the same way.)
+chat interface. The model picker shows **Yami v1.0** (the name in
+`configs/inference/default.yaml`). Type an instruction and the answer
+streams back. (The `web` service speaks the Ollama API at
+http://localhost:8321 — any Ollama-compatible UI or client can connect the
+same way.)
 
 Programmatic API:
 
@@ -43,14 +44,15 @@ curl -X POST http://localhost:8321/generate \
 ## Train inside Docker
 
 Prepare data first on the host (tokenizer + `fontaine data prepare`, see
-[docs/info.html](../info.html) for the gentle version), then:
+[docs/information.html](../information.html)), then:
 
 ```bash
 docker compose run --rm train
 ```
 
-The run writes `datasets/prepared/` and `experiments/<timestamp>_<run>/` back
-to the host folders. When it finishes, point the web service at the new run:
+The run reads the prepared manifest and writes
+`experiments/<timestamp>_<run>/` (metrics, logs, checkpoints) back to the
+host. When it finishes, point the web service at the new run:
 
 ```bash
 # .env

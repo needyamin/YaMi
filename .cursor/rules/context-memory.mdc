@@ -1,0 +1,12 @@
+---
+description: Read and update the local project memory before exploring the repo
+alwaysApply: true
+---
+
+# Local context memory
+
+At the start of a task, read `CONTEXT_MEMORY.txt` in the repo root if it exists. Treat it as the current project facts. Do not re-scan the repo for facts already recorded there.
+
+When you learn or change something that the next session would otherwise have to rediscover (behavior, ports, model name, sizes, commands, user preferences), update `CONTEXT_MEMORY.txt` in the same turn. Keep it factual and short. Do not paste long code.
+
+`CONTEXT_MEMORY.txt` is gitignored. Never stage it, commit it, or copy it into docs that are committed.

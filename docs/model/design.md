@@ -46,6 +46,25 @@ style — without architectural change).
 Configurable `intermediate_size` (≈2.7×hidden for SwiGLU vs ≈4×hidden for
 GELU); `activation: gelu` selects the classic MLP if wanted.
 
+### Mixture of experts
+`architecture: moe_decoder` with `num_experts >= 2` replaces that MLP with a
+token-choice mixture (`MixtureOfExperts`). A bias-free router picks the top
+`num_experts_per_token` experts, and only those experts run, only on the
+tokens that selected them. **Active** parameters are what one token
+multiplies (attention, norms, router, and the chosen experts, plus the
+embedding). **Total** parameters count every expert — AdamW stores all of
+them, so training memory follows the total. A dense model
+(`num_experts: 1`) has active equal to total and no router.
+
+Training adds a Switch load-balance term,
+`num_experts * sum(fraction_dispatched * mean_router_prob)`, scaled by
+`moe_aux_loss_coef` (default 0.01). The dispatch fraction is detached.
+Evaluation and generation do not add the term, so validation loss stays
+plain cross-entropy. The coding ladder
+(`configs/model/coding_low.yaml`, `coding_mid.yaml`, `coding_high.yaml`)
+uses this so a laptop can run a model whose stored capacity is larger than
+the matmuls per token.
+
 ### Normalization: RMSNorm (pre-norm)
 Pre-norm residual blocks (`x + attn(norm(x))`) keep gradients healthy in deep
 stacks. RMSNorm is cheaper than LayerNorm and equally stable; computed in
@@ -66,7 +85,7 @@ model change. `ModelOutput` carries both logits and (optionally) loss.
 
 | Field | Component | Notes |
 | --- | --- | --- |
-| `architecture` | whole model | extension point; `decoder_transformer` today |
+| `architecture` | whole model | `decoder_transformer` or `moe_decoder` |
 | `vocab_size` | embedding + head | int or `"auto"` (resolve from tokenizer) |
 | `hidden_size`, `num_layers` | capacity | scale together (Chinchilla-style) |
 | `num_attention_heads` / `num_kv_heads` | attention | ratio = GQA group size |
@@ -76,6 +95,10 @@ model change. `ModelOutput` carries both logits and (optionally) loss.
 | `dropout` | attention + residuals | 0.0 for LLM pretraining typical |
 | `activation`, `normalization` | FFN, blocks | swiglu/gelu, rmsnorm/layernorm |
 | `tie_word_embeddings` | head | parameter savings at small scale |
+| `num_experts` | FFN | 1 = dense MLP; ≥2 = mixture of experts |
+| `num_experts_per_token` | router | how many experts run per token (active params) |
+| `moe_aux_loss_coef` | training loss | Switch load-balance term; 0 disables it |
+| `cpu_tier` | inspect only | label printed by `fontaine model inspect` |
 
 ## Inference path
 
@@ -91,5 +114,6 @@ interface later.
   the same decoder stack is the standard path.
 - **State-space models (Mamba)**: promising, but the Transformer is the
   well-understood default; the `architecture` field leaves room to add one.
-- **Mixture-of-experts**: multiplies infra complexity; the FFN is a clean
-  swap-in point when compute allows.
+- **Mixture-of-experts as a separate model class**: the FFN is the swap.
+  `moe_decoder` is the same `FontaineModel` with a routed feed-forward, so
+  the trainer, checkpoints, and KV cache stay unchanged.

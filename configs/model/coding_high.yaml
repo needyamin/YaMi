@@ -1,0 +1,26 @@
+# Coding High — workstation CPU for inference; a GPU for training.
+# About 129M active / 384M total parameters at vocab 32768.
+# Training state is ~6 GB before activations: enable gradient checkpointing.
+# Train with data.sequence_length=2048 (must be <= max_sequence_length).
+# Set vocab_size: auto to adopt a trained tokenizer; the counts above assume 32768.
+model:
+  architecture: moe_decoder
+  cpu_tier: "high — workstation CPU to run, GPU to train"
+  vocab_size: 32768
+  hidden_size: 768
+  num_layers: 12
+  num_attention_heads: 12
+  num_kv_heads: 4
+  intermediate_size: 1536
+  num_experts: 8
+  num_experts_per_token: 2
+  moe_aux_loss_coef: 0.01
+  max_sequence_length: 2048
+  rope_theta: 10000.0
+  dropout: 0.0
+  activation: swiglu
+  normalization: rmsnorm
+  norm_eps: 0.00001
+  tie_word_embeddings: true
+  attention_bias: false
+  mlp_bias: false

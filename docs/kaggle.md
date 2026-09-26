@@ -57,8 +57,8 @@ in the background — the zip then appears under the version's **Output** tab).
 ## 4. Download the trained model
 
 - Interactive session: right panel → **Output** → download
-  `fontaine_<run>.zip` (the small ≈ 15 MB/model-file zip, well under the
-  ~20 GB output limit).
+  `fontaine_<run>.zip`. A tiny checkpoint is tens of megabytes (fp32 weights
+  plus Adam state), well under the ~20 GB output limit.
 - Saved version: notebook page → **Output** tab → download.
 - Big checkpoints can also be saved as a new Kaggle Dataset ("New Dataset"
   from output) and pulled locally with
@@ -84,10 +84,10 @@ do for CPU-trained runs.
 - **Precision:** `training.precision: auto` in `configs/training/kaggle.yaml`
   picks bf16 on bf16-capable GPUs and fp16 + GradScaler on T4/P100 — no edits
   needed.
-- **Resuming:** a killed session loses nothing already in `/kaggle/working`
-  for 12 h sessions that were saved, but training itself restarts from step 0
-  (no resume-from-checkpoint flag yet). Prefer sizing `max_steps` to finish
-  within one session.
+- **Resuming:** files already written to `/kaggle/working` survive a saved
+  session, but the notebook starts each run from step 0. The CLI can continue
+  a run with `fontaine train --resume <checkpoints dir>` (that directory's
+  `latest.json`). Prefer sizing `max_steps` to finish within one session.
 - **Medium model:** set `batch_size: 32` and `gradient_checkpointing: true`
   in `configs/training/kaggle.yaml` if you hit VRAM limits.
 - **No internet?** If you must keep Internet off, upload the repo zip as a

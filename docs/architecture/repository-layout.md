@@ -10,8 +10,8 @@ fontaine-ai/
 │   ├── requirements.txt      # runtime deps (torch, numpy, pyyaml)
 │   └── requirements-dev.txt  # + pytest, tokenizers, ruff
 ├── configs/
-│   ├── model/                # tiny.yaml · small.yaml · medium.yaml
-│   ├── training/             # local.yaml · tiny_test.yaml
+│   ├── model/                # tiny · small · medium · coding_low · coding_mid · coding_high
+│   ├── training/             # local.yaml · tiny_test.yaml · kaggle.yaml
 │   ├── data/                 # default.yaml
 │   └── inference/            # default.yaml
 ├── docs/                     # see docs/index.md

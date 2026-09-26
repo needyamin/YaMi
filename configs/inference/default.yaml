@@ -1,11 +1,15 @@
 # Inference / generation defaults (overridable per request via the API).
+# Coding-oriented: low temperature, a tight nucleus, and a light repetition penalty.
+# Chat stop sequences are added by /api/chat (the Alpaca turn markers), not here,
+# so raw /api/generate is unchanged.
 inference:
-  temperature: 0.8
+  temperature: 0.2
   top_k: 50
-  top_p: 0.95
-  repetition_penalty: 1.1
+  top_p: 0.9
+  repetition_penalty: 1.05
   max_new_tokens: 256
   stop_sequences: []
   seed: null
+  model_name: "Yami v1.0"   # label in the chat model picker
   server_host: 127.0.0.1
   server_port: 8321

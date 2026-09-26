@@ -2,6 +2,7 @@
 
 from fontaine.config.schema import InferenceConfig
 from fontaine.inference import Generator
+from fontaine.inference.engine import fit_context
 from fontaine.models import build_model
 
 
@@ -58,9 +59,30 @@ def test_long_prompt_truncated_not_crash(model_config, tokenizer):
     assert isinstance(text, str)
 
 
-def test_empty_generation_at_context_limit(model_config, tokenizer):
-    # max_new_tokens fills the whole context: prompt is cut to nothing left
-    config = InferenceConfig(temperature=0.0, max_new_tokens=model_config.max_sequence_length)
+def test_full_window_request_keeps_the_prompt(model_config, tokenizer):
+    """A request as long as the window must not discard the question or overflow."""
+    prompt = "hello"
+    prompt_len = len(tokenizer.encode(prompt))
+    window = model_config.max_sequence_length
+    kept, gen_budget = fit_context(prompt_len, window, window)
+    assert kept == prompt_len
+    assert gen_budget == window - prompt_len
+    assert kept + gen_budget <= window
+    config = InferenceConfig(temperature=0.0, max_new_tokens=window)
     generator = Generator(build_model(model_config), tokenizer, config, device="cpu")
-    text = generator.generate("hello")
+    text = generator.generate(prompt)
     assert isinstance(text, str)
+
+
+def test_context_budget_reserves_prompt_when_both_overflow():
+    # 256-token model, 256 requested new tokens, a long prompt: keep 75% for the prompt.
+    kept, gen_budget = fit_context(prompt_len=300, max_new_tokens=256, max_sequence_length=256)
+    assert kept == 192
+    assert gen_budget == 64
+    assert kept + gen_budget <= 256
+
+
+def test_context_budget_keeps_short_prompt_and_shrinks_the_answer():
+    kept, gen_budget = fit_context(prompt_len=20, max_new_tokens=256, max_sequence_length=256)
+    assert kept == 20
+    assert gen_budget == 236

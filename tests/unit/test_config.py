@@ -80,6 +80,16 @@ def test_model_validation_divisibility():
         ModelConfig(num_attention_heads=4, num_kv_heads=3).validate()
 
 
+def test_moe_architecture_rules():
+    ModelConfig(architecture="moe_decoder", num_experts=4, num_experts_per_token=2).validate()
+    with pytest.raises(ConfigError, match="num_experts=1"):
+        ModelConfig(architecture="decoder_transformer", num_experts=4).validate()
+    with pytest.raises(ConfigError, match="num_experts >= 2"):
+        ModelConfig(architecture="moe_decoder", num_experts=1).validate()
+    with pytest.raises(ConfigError, match="num_experts_per_token"):
+        ModelConfig(architecture="moe_decoder", num_experts=2, num_experts_per_token=3).validate()
+
+
 def test_vocab_auto_accepted():
     ModelConfig(vocab_size="auto").validate()
     with pytest.raises(ConfigError, match="auto"):

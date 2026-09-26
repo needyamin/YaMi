@@ -133,4 +133,6 @@ def test_param_count_matches_analytic_estimate():
 
     config = _tiny_model_config(tie_word_embeddings=False)
     model = build_model(config)
-    assert model.num_parameters() == estimate_parameter_count(config)["total"]
+    counts = estimate_parameter_count(config)
+    assert model.num_parameters() == counts["total"]
+    assert model.num_active_parameters() == counts["active"]

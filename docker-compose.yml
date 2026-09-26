@@ -26,6 +26,7 @@ services:
       serve
       --checkpoint ${FONTAINE_CHECKPOINT:-/app/experiments/2026-09-22_104709_smoke-codealpaca/checkpoints}
       --tokenizer-dir /app/datasets/tokenizer
+      --inference-config /app/configs/inference/default.yaml
       --set inference.server_host=0.0.0.0
     restart: unless-stopped
 
@@ -34,7 +35,7 @@ services:
   #
   # Talks to the `web` service over the Ollama API; the served checkpoint
   # shows up in its model picker. First start pulls a large image and the UI
-  # needs a minute to boot; create a local account on first visit.
+  # needs a minute to boot. WEBUI_AUTH=false skips the sign-up wall.
   # ---------------------------------------------------------------------------
   webui:
     image: ghcr.io/open-webui/open-webui:main
@@ -49,7 +50,8 @@ services:
     volumes:
       - open-webui:/app/backend/data
     depends_on:
-      - web
+      web:
+        condition: service_healthy
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------

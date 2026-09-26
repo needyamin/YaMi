@@ -22,7 +22,7 @@ when the hardware arrives.
    constants in source code.
 3. Reproducible — configs, git commit, tokenizer/dataset versions, seeds, and
    RNG states are captured in every experiment and checkpoint.
-4. Testable — 92 tests, including an overfit-a-tiny-dataset sanity check and a
+4. Testable — 116 tests, including an overfit-a-tiny-dataset sanity check and a
    full CLI end-to-end test.
 5. Observable — experiment directories with `metrics.jsonl`, logs, summaries.
 6. Memory-efficient — streaming data, memory-mapped shards, gradient
@@ -30,8 +30,10 @@ when the hardware arrives.
 7. Hardware-independent where practical — device resolution (`auto`),
    precision resolution per device, CPU-first development.
 8. Dataset-independent — raw text/JSONL/CSV/JSON in; token shards out.
-9. Model-size-independent — `FontaineModel` serves every size from Tiny to XL;
-   sizes live in configs (`tiny.yaml` … `medium.yaml` …).
+9. Model-size-independent — `FontaineModel` serves every size from Tiny to XL,
+   including the coding mixture-of-experts ladder; sizes live in configs
+   (`tiny.yaml`, `small.yaml`, `medium.yaml`, `coding_low.yaml`,
+   `coding_mid.yaml`, `coding_high.yaml`).
 10. Backward-compatible — versioned config/checkpoint/manifest formats.
 11. Easy to experiment with — one command per workflow stage.
 12. Easy to scale — clean seams: `TrainingStrategy`, `Tokenizer`,
@@ -87,7 +89,7 @@ implementation while the arrows (interfaces) stay the same.
 
 | Component | Package | Stable interface | Current implementation | Future evolution |
 | --- | --- | --- | --- | --- |
-| Model | `fontaine.models` | `model(input_ids, targets, cache) -> ModelOutput` | `FontaineModel` (RoPE, GQA, SwiGLU) | MoE, Mamba, TP-sharded weights via `build_model` |
+| Model | `fontaine.models` | `model(input_ids, targets, cache) -> ModelOutput` | `FontaineModel` (RoPE, GQA, SwiGLU, optional MoE FFN) | Mamba, TP-sharded weights via `build_model` |
 | Tokenizer | `fontaine.tokenizer` | `encode/decode/save/load/version` | char + HF byte-level BPE | SentencePiece, Unigram, multilingual |
 | Data pipeline | `fontaine.data` | streaming iterators, `TokenShardDataset` | local filesystem shards | object storage, Spark/Ray workers, MinHash dedup |
 | Training | `fontaine.training` | `Trainer.fit(resume=...)` | single-process AdamW loop | DDP/FSDP strategies, SFT/DPO trainers |

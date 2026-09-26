@@ -11,8 +11,8 @@ defaults (schema dataclass defaults, tiny model)
 
 ```
 configs/
-├── model/       tiny.yaml · small.yaml · medium.yaml
-├── training/    local.yaml · tiny_test.yaml
+├── model/       tiny.yaml · small.yaml · medium.yaml · coding_low.yaml · coding_mid.yaml · coding_high.yaml
+├── training/    local.yaml · tiny_test.yaml · kaggle.yaml
 ├── data/        default.yaml
 └── inference/   default.yaml
 ```

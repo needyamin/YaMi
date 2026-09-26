@@ -26,8 +26,11 @@ flowchart LR
   request → reproducible outputs).
 - **Streaming** — `generate(prompt, stream=True)` yields only the newly
   decoded deltas; joining them reproduces the full text (test-enforced).
-- **Context management** — prompts longer than `max_sequence_length −
-  max_new_tokens` are left-truncated with a warning; cache overflow raises.
+- **Context management** — `fit_context` keeps the prompt and the requested
+  answer when both fit in `max_sequence_length`. When they do not, it keeps
+  the tail of the prompt (at most 75% of the window) and spends the rest on
+  the answer (at least one token, never more than requested). Generation
+  stops before the KV cache overflows.
 - **Isolation** — one lock serializes requests sharing a model/cache;
   concurrency = one Generator per worker process.
 
@@ -68,5 +71,8 @@ fontaine serve --checkpoint <ckpt> --tokenizer-dir datasets/tokenizer
 curl -X POST localhost:8321/generate -d '{"prompt": "Hi", "stream": false}'
 ```
 
-This is a development convenience proving the API contract — the production
-serving path is a different tier (see `docs/deployment/serving.md`).
+The same process also speaks the Ollama-compatible API (`/api/chat`,
+`/api/tags`, `/api/ps`, `/api/show`) so Open WebUI can attach with no model
+conversion. Route details, the Alpaca chat template, and active versus total
+parameter reporting are in `docs/deployment/serving.md`. This server is a
+development convenience — the production serving path is a different tier.

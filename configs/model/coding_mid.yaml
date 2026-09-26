@@ -1,0 +1,25 @@
+# Coding Mid — desktop CPU or a free GPU.
+# About 39M active / 114M total parameters at vocab 16384.
+# Train with data.sequence_length=1024 (must be <= max_sequence_length).
+# Set vocab_size: auto to adopt a trained tokenizer; the counts above assume 16384.
+model:
+  architecture: moe_decoder
+  cpu_tier: "mid — desktop CPU or a free GPU"
+  vocab_size: 16384
+  hidden_size: 512
+  num_layers: 8
+  num_attention_heads: 8
+  num_kv_heads: 2
+  intermediate_size: 1024
+  num_experts: 8
+  num_experts_per_token: 2
+  moe_aux_loss_coef: 0.01
+  max_sequence_length: 1024
+  rope_theta: 10000.0
+  dropout: 0.0
+  activation: swiglu
+  normalization: rmsnorm
+  norm_eps: 0.00001
+  tie_word_embeddings: true
+  attention_bias: false
+  mlp_bias: false

@@ -38,6 +38,9 @@ trainer changes (test-enforced); `fontaine evaluate` works standalone.
 **Done when:** KV-cached generation with temperature/top-k/top-p/repetition
 penalty/stop sequences/max tokens; streaming deltas; deterministic seeding;
 `fontaine generate` + dev `/generate` API; generation correctness tests pass.
+The same server now also speaks the Ollama-compatible chat API used by
+Open WebUI (`/api/chat`, `/api/tags`, `/api/ps`); see
+`docs/deployment/serving.md`.
 
 ## Phase 7 — Fine-Tuning (next)
 **Done when:** instruction-format dataset adapter (prompt-masked labels);
@@ -63,5 +66,5 @@ quantized workers); post-training pipeline (SFT → DPO) operational.
 
 | Phase | Status | Evidence |
 | --- | --- | --- |
-| 0–6 | ✅ complete | 92 passing tests + CLI integration test in this repo |
+| 0–6 | ✅ complete | 116 passing tests + CLI integration test in this repo |
 | 7–10 | designed, seams in place | docs: `research/`, `scaling/`, `deployment/` |

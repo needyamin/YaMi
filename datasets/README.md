@@ -6,7 +6,8 @@ Suggested layout:
 
 ```
 datasets/
-├── raw/          # your source documents (txt / jsonl / csv / json)
+├── downloads/    # original files, untouched (e.g. CodeAlpaca JSON)
+├── raw/          # documents the pipeline reads (txt / jsonl / csv / json)
 ├── prepared/     # output of `fontaine data prepare` (shards + manifest)
 └── tokenizer/    # trained tokenizer artifacts
 ```

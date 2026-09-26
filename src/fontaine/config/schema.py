@@ -16,7 +16,7 @@ from typing import Any
 
 from fontaine.config.errors import ConfigError
 
-VALID_ARCHITECTURES = ("decoder_transformer",)
+VALID_ARCHITECTURES = ("decoder_transformer", "moe_decoder")
 VALID_ACTIVATIONS = ("swiglu", "gelu")
 VALID_NORMS = ("rmsnorm", "layernorm")
 VALID_PRECISIONS = ("auto", "fp32", "bf16", "fp16")
@@ -33,8 +33,8 @@ class ModelConfig:
     Fontaine XL -- only the values change, never the code.
     """
 
-    # Extension point: future architectures ("moe", "mamba", ...) register in
-    # fontaine.models.factory without changing this schema.
+    # ``decoder_transformer`` is dense. ``moe_decoder`` swaps the feed-forward
+    # for a mixture of experts (see fontaine.models.factory).
     architecture: str = "decoder_transformer"
     # int, or the literal string "auto" (= resolve from the trained tokenizer
     # at train time; see fontaine.tokenizer.registry.resolve_vocab_size).
@@ -53,6 +53,13 @@ class ModelConfig:
     tie_word_embeddings: bool = True
     attention_bias: bool = False
     mlp_bias: bool = False
+    # Mixture-of-experts feed-forward. ``num_experts == 1`` keeps the dense MLP
+    # (no router). ``moe_decoder`` requires at least two experts.
+    num_experts: int = 1
+    num_experts_per_token: int = 1
+    moe_aux_loss_coef: float = 0.01
+    # Display label for ``fontaine model inspect`` (empty for the dense ladder).
+    cpu_tier: str = ""
 
     def validate(self) -> None:
         if self.architecture not in VALID_ARCHITECTURES:
@@ -86,6 +93,21 @@ class ModelConfig:
             raise ConfigError(f"model.normalization must be one of {VALID_NORMS}")
         if self.norm_eps <= 0:
             raise ConfigError("model.norm_eps must be > 0")
+        if self.num_experts < 1:
+            raise ConfigError("model.num_experts must be >= 1")
+        if not 1 <= self.num_experts_per_token <= self.num_experts:
+            raise ConfigError(
+                "model.num_experts_per_token must be between 1 and model.num_experts"
+            )
+        if self.moe_aux_loss_coef < 0:
+            raise ConfigError("model.moe_aux_loss_coef must be >= 0")
+        if self.architecture == "decoder_transformer" and self.num_experts != 1:
+            raise ConfigError(
+                "decoder_transformer requires model.num_experts=1; "
+                "use architecture moe_decoder for a mixture of experts"
+            )
+        if self.architecture == "moe_decoder" and self.num_experts < 2:
+            raise ConfigError("moe_decoder requires model.num_experts >= 2")
 
     @property
     def head_dim(self) -> int:
@@ -254,6 +276,8 @@ class InferenceConfig:
     max_new_tokens: int = 256
     stop_sequences: list[str] = field(default_factory=list)
     seed: int | None = None
+    # Name shown in chat model pickers (Ollama /api/tags, /api/ps, /api/show).
+    model_name: str = "Yami v1.0"
     # Dev-only HTTP server.
     server_host: str = "127.0.0.1"
     server_port: int = 8321
@@ -269,6 +293,8 @@ class InferenceConfig:
             raise ConfigError("inference.repetition_penalty must be >= 1.0 (1.0 = disabled)")
         if self.max_new_tokens < 1:
             raise ConfigError("inference.max_new_tokens must be >= 1")
+        if not isinstance(self.model_name, str) or not self.model_name.strip():
+            raise ConfigError("inference.model_name must be a non-empty string")
 
 
 @dataclass

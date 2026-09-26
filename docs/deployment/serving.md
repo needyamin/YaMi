@@ -11,8 +11,9 @@ Ollama API contract:
 
 ```
 GET  /api/version   → {"version": "..."}
-GET  /api/tags      → {"models": [{"name": "<run>", "details": {...}}]}
-POST /api/show      → model metadata (template, parameter count)
+GET  /api/tags      → {"models": [{"name": "Yami v1.0", "details": {...}}]}
+GET  /api/ps        → {"models": [ ... the loaded model ... ]}
+POST /api/show      → model metadata (template, total and active parameter counts)
 POST /api/chat      {"messages": [{"role": "user", "content": "..."}],
                       "stream": true, "options": {"temperature": 0.7}}
 → {"message": {"role": "assistant", "content": "..."}, "done": false} × N
@@ -21,9 +22,39 @@ POST /api/chat      {"messages": [{"role": "user", "content": "..."}],
 
 Chat is stateless per request, like real Ollama: the client sends the full
 history; the server renders it through the Alpaca-style template in
-`fontaine.inference.chat_template` (matching the CodeAlpaca-style training
-data). `options` maps onto the engine's sampling config (`num_predict` →
-`max_new_tokens`, `repeat_penalty` → `repetition_penalty`, ...).
+`fontaine.inference.chat_template`, the same layout CodeAlpaca training uses:
+
+```
+### Instruction:
+{user}
+
+### Response:
+{assistant}
+```
+
+`content` may be a string or a list of `{type, text}` parts (image parts are
+ignored; a message with no text is a 400). `options` maps onto the engine's
+sampling config (`num_predict` → `max_new_tokens`, `repeat_penalty` →
+`repetition_penalty`, ...). Unless the client already sent `stop`, `/api/chat`
+stops at `\n### Instruction:` and `\n### Input:` so the model does not invent
+the next user turn. `/api/generate` does not add those stops.
+
+The name in that list is `inference.model_name` (default **Yami v1.0**),
+which is what Open WebUI and other Ollama clients show in the model picker.
+`details.parameter_size` is the total parameter count. `active_parameter_size`,
+and `general.active_parameter_count` on `/api/show`, are the weights one token
+actually multiplies (equal to the total for a dense model; smaller for
+`moe_decoder`).
+
+The context window never drops the question to make room for a long answer.
+If the prompt and the requested tokens both fit, both are kept. If they do
+not, the prompt is left-truncated to at most 75% of `max_sequence_length` and
+the remainder is the answer budget (at least one token, never more than
+requested). Generation stops before the KV cache overflows.
+
+Sampling defaults live in `configs/inference/default.yaml` (temperature 0.2,
+top-p 0.9, repetition penalty 1.05) and apply when that file is passed to
+`fontaine serve`, including the Docker `web` service.
 
 **Fontaine-native** — the original contract, kept for tooling and tests:
 

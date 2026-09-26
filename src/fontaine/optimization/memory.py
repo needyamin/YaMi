@@ -62,20 +62,57 @@ def format_bytes(num_bytes: float) -> str:
 
 
 def estimate_parameter_count(config: ModelConfig) -> dict[str, int]:
-    """Analytic parameter count (no model instantiation, works on any size)."""
-    h = config.hidden_size
-    head_dim = config.head_dim
-    kv_dim = config.num_kv_heads * head_dim
+    """Analytic parameter count (no model instantiation, works on any size).
 
+    ``total`` counts every stored weight, including idle experts. ``active``
+    counts the weights touched for one token: attention, norms, the router,
+    and ``num_experts_per_token`` experts. A dense model (``num_experts == 1``)
+    has ``active == total``. Training memory uses ``total`` because AdamW
+    stores a state for every expert.
+    """
+    if isinstance(config.vocab_size, str):
+        raise ValueError(
+            "estimate_parameter_count needs a numeric vocab_size; "
+            "resolve model.vocab_size=auto from a tokenizer first"
+        )
+    h = config.hidden_size
+    kv_dim = config.num_kv_heads * config.head_dim
+
+    attn = h * h + 2 * h * kv_dim + h * h
+    if config.attention_bias:
+        attn += h + kv_dim + kv_dim + h
+
+    inter = config.intermediate_size
     if config.activation == "swiglu":
-        ffn = 3 * h * config.intermediate_size
+        one_expert = 3 * h * inter
+        if config.mlp_bias:
+            one_expert += 2 * inter + h
     else:
-        ffn = 2 * h * config.intermediate_size
-    per_layer = (h * h + 2 * h * kv_dim + h * h) + ffn + 2 * h  # attn + ffn + 2 norms
+        one_expert = 2 * h * inter
+        if config.mlp_bias:
+            one_expert += inter + h
+
+    if config.num_experts > 1:
+        router = h * config.num_experts  # bias-free router
+        ffn_total = config.num_experts * one_expert + router
+        ffn_active = config.num_experts_per_token * one_expert + router
+    else:
+        ffn_total = one_expert
+        ffn_active = one_expert
+
+    norms = 2 * h  # two pre-norm RMSNorm weights
+    per_layer_total = attn + ffn_total + norms
+    per_layer_active = attn + ffn_active + norms
     embedding = config.vocab_size * h
     head = 0 if config.tie_word_embeddings else embedding
-    total = config.num_layers * per_layer + embedding + head + h  # + final norm
-    return {"total": total, "non_embedding": total - embedding - head}
+    final_norm = h
+    total = config.num_layers * per_layer_total + embedding + head + final_norm
+    active = config.num_layers * per_layer_active + embedding + head + final_norm
+    return {
+        "total": total,
+        "active": active,
+        "non_embedding": total - embedding - head,
+    }
 
 
 def estimate_training_memory(

@@ -20,21 +20,34 @@ which is why training memory is several × model size.
 exactly this breakdown analytically (no GPU required) — cross-checked against
 instantiated parameter counts by tests.
 
-## Reference numbers (fp32 + AdamW, activations at batch 8 × seq 512)
+## Reference numbers
+
+Parameter counts are what `fontaine model inspect` prints at an 8k vocabulary.
+Training state is 16 bytes per **total** parameter (fp32 weights + gradients +
+AdamW). Activations use this file's estimator at batch 8 and that model's own
+context (`gradient_checkpointing` off). Coding rows are mixture-of-experts:
+AdamW pays for every expert, so the state column uses the total, not the
+active count.
 
 | Model | Params | Params+grad+optim | Rough total w/ activations | 16 GB verdict |
 | --- | --- | --- | --- | --- |
-| Fontaine Tiny | ~3–5 M | ~64 MB | ~0.3–0.5 GB | trivial, CPU ok |
-| Fontaine Small | ~40–60 M | ~0.8–1.0 GB | ~2–4 GB | fine |
-| Fontaine Medium | ~130–160 M | ~2.5 GB | ~8–14 GB | tight; needs bf16/GPU or aggressive techniques |
+| Fontaine Tiny | ~5.2 M dense | ~80 MB | ~0.13 GB (seq 256) | trivial, CPU ok |
+| Fontaine Small | ~28 M dense | ~0.4 GB | ~0.8 GB (seq 512) | fits; a GPU is much faster |
+| Fontaine Medium | ~82 M dense | ~1.2 GB | ~2.9 GB (seq 1024) | fits in RAM; train on a GPU |
+| Coding Low | 5.7 M active / 22 M total | ~0.3 GB | ~0.5 GB (seq 512) | laptop CPU, 16 GB RAM |
+| Coding Mid | 39 M active / 114 M total | ~1.7 GB | ~2.5 GB (seq 1024) | desktop CPU or a free GPU |
+| Coding High | 129 M active / 384 M total | ~5.7 GB | ~9 GB (seq 2048) | workstation to run; GPU to train |
 | 1 B | — | 16 GB | 25 GB+ | **not trainable on this machine** |
 | 70 B | — | 1.1 TB | much more | multi-node FSDP territory |
 
 ## What IS feasible on 16 GB RAM
 
-- Fontaine Tiny/Small training (CPU or modest GPU), comfortably.
-- Fontaine Medium *architecture* experiments with bf16 + gradient
-  checkpointing + small batches on a 16 GB-VRAM GPU.
+- Fontaine Tiny and Coding Low training on CPU, comfortably.
+- Fontaine Small and Coding Mid in 16 GB RAM; a modest or free GPU is the
+  practical trainer.
+- Fontaine Medium (~82 M, about 3 GB at batch 8 × 1024 in fp32). It fits in
+  16 GB RAM; a GPU is still how you actually train it. Coding High needs a
+  GPU and gradient checkpointing.
 - Inference of models up to roughly ~1.5–2 B parameters (int8/int4 quantized).
 - Data pipelines over corpora far larger than RAM (memmap + streaming).
 

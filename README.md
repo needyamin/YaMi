@@ -101,7 +101,8 @@ The stack runs in one CPU container plus [Open WebUI](https://github.com/open-we
 — the open-source Ollama chat interface. `fontaine serve` speaks the
 Ollama API (`/api/chat`, `/api/generate`, `/api/tags`), so any
 Ollama-compatible UI or client connects to your checkpoint with no model
-conversion; the native `/generate` JSON/SSE API stays for tooling.
+conversion. The model picker shows **Yami v1.0**. The native `/generate`
+JSON/SSE API stays for tooling.
 
 ```bash
 cp .env.example .env             # pick the checkpoint to serve + host ports
@@ -135,19 +136,28 @@ python tools/prepare_codealpaca.py \
   --output datasets/raw/codealpaca_20k.jsonl
 ```
 
-A beginner-friendly, every-step guide (download → convert → prepare →
-train → web playground) lives at [docs/info.html](https://needyamin.github.io/YaMi/docs/info.html);
-the Docker deep-dive at [docs/docker_info.html](https://needyamin.github.io/YaMi/docs/docker_info.html).
+A single project guide (data, training, model sizes, and browser chat) lives at
+[docs/information.html](https://needyamin.github.io/YaMi/docs/information.html).
 
 ## Scaling path
 
 | Stage | Params | Hardware |
 | --- | --- | --- |
-| Fontaine Tiny | 3–5 M | CPU / 16 GB RAM — **works today** |
-| Fontaine Small | 40–60 M | modest GPU — free Kaggle T4 |
-| Fontaine Medium | 130–160 M | 16 GB+ VRAM — Kaggle T4/P100 |
+| Fontaine Tiny | ~5.2 M dense | CPU / 16 GB RAM — **works today** |
+| Fontaine Small | ~28 M dense | modest GPU — free Kaggle T4 |
+| Fontaine Medium | ~82 M dense | free GPU — Kaggle T4 |
+| Coding Low | 5.7 M active / 22 M total | laptop CPU, 16 GB RAM |
+| Coding Mid | 39 M active / 114 M total | desktop CPU or a free GPU |
+| Coding High | 129 M active / 384 M total | workstation CPU to run; GPU to train |
 | Fontaine Large → XL | 0.4–4 B | multi-GPU (DDP → FSDP) |
 | Distributed Fontaine | 8 B+ | multi-node, TP/PP, sharded everything |
+
+Dense counts assume an 8k vocabulary (`fontaine model inspect` prints the
+exact active and total counts for any config). Coding sizes are
+mixture-of-experts: every expert is stored, and only the top-1 or top-2
+experts run per token, so a laptop pays the active cost. Configs:
+`configs/model/coding_low.yaml`, `coding_mid.yaml`, `coding_high.yaml`.
+Train each with `data.sequence_length` equal to that model's context.
 
 Sizes are YAML files, not code branches. The seams (`TrainingStrategy`,
 `Tokenizer`, evaluator registry, `build_model`, checkpoint format v1) are the
@@ -156,7 +166,7 @@ migration path — see [docs/scaling/roadmap.md](docs/scaling/roadmap.md) and
 
 ## Repository
 
-Source in `src/fontaine/`, configs in `configs/`, tests in `tests/` (92
+Source in `src/fontaine/`, configs in `configs/`, tests in `tests/` (116
 tests, CPU-only, minutes), docs in `docs/`, dataset converter gadgets in
 `tools/`, and the Kaggle GPU training notebook in `kaggle/`. Datasets,
 checkpoints, experiments, and logs are artifacts — never

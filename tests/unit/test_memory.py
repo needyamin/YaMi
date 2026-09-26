@@ -33,8 +33,10 @@ def test_parameter_count_analytic_matches_instantiated():
     from fontaine.models import build_model
 
     model = build_model(config)
-    assert model.num_parameters() == estimate_parameter_count(config)["total"]
-    assert model.num_parameters(non_embedding=True) == estimate_parameter_count(config)["non_embedding"]
+    counts = estimate_parameter_count(config)
+    assert model.num_parameters() == counts["total"]
+    assert model.num_parameters(non_embedding=True) == counts["non_embedding"]
+    assert model.num_active_parameters() == counts["active"] == counts["total"]
 
 
 def test_optimizer_states_dominate_over_parameters():

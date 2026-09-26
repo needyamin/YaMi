@@ -49,4 +49,5 @@ ENTRYPOINT ["fontaine"]
 # Fallback for bare `docker run fontaine-ai` — compose overrides this.
 CMD ["serve", "--checkpoint", "/app/experiments/current/checkpoints", \
      "--tokenizer-dir", "/app/datasets/tokenizer", \
+     "--inference-config", "/app/configs/inference/default.yaml", \
      "--set", "inference.server_host=0.0.0.0"]

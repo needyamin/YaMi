@@ -23,6 +23,30 @@ from fontaine.utils.logging import get_logger
 logger = get_logger("inference")
 
 
+def fit_context(prompt_len: int, max_new_tokens: int, max_sequence_length: int) -> tuple[int, int]:
+    """Choose how many prompt tokens to keep and how many tokens to generate.
+
+    If the prompt and the requested answer both fit in the window, keep both.
+    Otherwise keep the tail of the prompt (at most 75% of the window) and give
+    the remainder to the answer, never more than ``max_new_tokens`` and never
+    fewer than one generated token. The returned pair always sums to at most
+    ``max_sequence_length``.
+    """
+    if max_sequence_length < 2:
+        raise ValueError(f"max_sequence_length must be >= 2, got {max_sequence_length}")
+    if prompt_len < 0 or max_new_tokens < 1:
+        raise ValueError("prompt_len must be >= 0 and max_new_tokens must be >= 1")
+    if prompt_len + max_new_tokens <= max_sequence_length:
+        return prompt_len, max_new_tokens
+    prompt_budget = min((max_sequence_length * 3) // 4, max_sequence_length - 1)
+    kept = min(prompt_len, max(prompt_budget, 1))
+    gen_budget = min(max_new_tokens, max_sequence_length - kept)
+    if gen_budget < 1:
+        kept = max_sequence_length - 1
+        gen_budget = 1
+    return kept, gen_budget
+
+
 class Generator:
     """Text generation against a trained Fontaine model.
 
@@ -89,13 +113,26 @@ class Generator:
                 else None
             )
             prompt_ids = self.tokenizer.encode(prompt)
-            headroom = self.model.config.max_sequence_length - sampling.max_new_tokens
-            if len(prompt_ids) > max(headroom, 1):
+            kept, gen_budget = fit_context(
+                len(prompt_ids),
+                sampling.max_new_tokens,
+                self.model.config.max_sequence_length,
+            )
+            if kept < len(prompt_ids):
                 logger.warning(
-                    "prompt (%d tokens) truncated from the left to fit the context window",
+                    "prompt (%d tokens) truncated from the left to %d tokens "
+                    "to fit the context window",
                     len(prompt_ids),
+                    kept,
                 )
-                prompt_ids = prompt_ids[-max(headroom, 1) :]
+                prompt_ids = prompt_ids[-kept:] if kept else []
+            if gen_budget < sampling.max_new_tokens:
+                logger.warning(
+                    "max_new_tokens reduced from %d to %d to fit the context window",
+                    sampling.max_new_tokens,
+                    gen_budget,
+                )
+                sampling = replace(sampling, max_new_tokens=gen_budget)
 
             cache = KVCache.from_config(
                 self.model.config, batch_size=1, device=self.device, dtype=torch.float32

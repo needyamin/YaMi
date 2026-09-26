@@ -29,6 +29,7 @@ without rewriting the codebase.
 | [development/testing.md](development/testing.md) | Test strategy and the overfit sanity check |
 | [development/security.md](development/security.md) | Security and data governance practices |
 | [development/roadmap.md](development/roadmap.md) | Phases and definition of done |
+| [information.html](information.html) | Single project guide: data, sizes, training, browser chat |
 
 ## Quickstart
 
@@ -47,10 +48,11 @@ fontaine data prepare --data-config configs/data/default.yaml \
 fontaine train --model-config configs/model/tiny.yaml \
   --training-config configs/training/local.yaml \
   --data-config configs/data/default.yaml \
-  --tokenizer-dir datasets/tokenizer
+  --tokenizer-dir datasets/tokenizer \
+  --set data.manifest_path=datasets/prepared/manifest.json
 
-# 4. generate
-fontaine generate --checkpoint experiments/<run>/checkpoints/latest \
+# 4. generate — the checkpoints folder resolves newest step via latest.json
+fontaine generate --checkpoint experiments/<run>/checkpoints \
   --tokenizer-dir datasets/tokenizer --prompt "Hello" --interactive
 ```
 

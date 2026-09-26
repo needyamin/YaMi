@@ -203,7 +203,15 @@ def cmd_model_inspect(args: argparse.Namespace) -> int:
     print(f"attention heads (q/k): {config.model.num_attention_heads}/{config.model.num_kv_heads}")
     print(f"max_sequence_length:   {config.model.max_sequence_length}")
     print(f"parameters (total):    {counts['total']:,}")
+    print(f"parameters (active):   {counts['active']:,}")
     print(f"parameters (non-emb):  {counts['non_embedding']:,}")
+    if config.model.cpu_tier:
+        print(f"cpu tier:              {config.model.cpu_tier}")
+    if config.model.num_experts > 1:
+        print(
+            f"experts:               {config.model.num_experts} "
+            f"(top-{config.model.num_experts_per_token} per token)"
+        )
     print()
     print("estimated training memory (fp32 + AdamW), per micro-batch:")
     for batch_size in (1, config.training.batch_size):
@@ -215,8 +223,9 @@ def cmd_model_inspect(args: argparse.Namespace) -> int:
         )
         print(f"  batch_size={batch_size}: " + ", ".join(f"{k}={v}" for k, v in estimate.as_dict().items()))
     print()
-    print("rule of thumb: parameters + gradients + AdamW states ≈ 16 bytes/parameter "
-          f"({format_bytes(16 * counts['total'])} here) BEFORE activations.")
+    print("rule of thumb: parameters + gradients + AdamW states are about 16 bytes/parameter "
+          f"({format_bytes(16 * counts['total'])} here, using total parameters) "
+          "BEFORE activations.")
     return 0
 
 
@@ -297,8 +306,9 @@ def cmd_train(args: argparse.Namespace) -> int:
         resume_dir=resume_dir,
     )
     logger.info(
-        "training %s: %.2fM params | %d train windows | device config=%s",
+        "training %s: %.2fM active / %.2fM total | %d train windows | device config=%s",
         config.training.run_name,
+        model.num_active_parameters() / 1e6,
         model.num_parameters() / 1e6,
         len(train_dataset),
         config.training.device,
@@ -411,7 +421,7 @@ def cmd_checkpoint_convert(args: argparse.Namespace) -> int:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
-    from fontaine.inference import infer_model_name, load_generator, serve
+    from fontaine.inference import load_generator, serve
 
     config = _load(args)
     generator = load_generator(args.checkpoint, args.tokenizer_dir, config.inference, device=args.device)
@@ -419,7 +429,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         generator,
         host=config.inference.server_host,
         port=config.inference.server_port,
-        model_name=infer_model_name(args.checkpoint),
+        model_name=config.inference.model_name,
     )
     return 0
 

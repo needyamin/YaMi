@@ -1,7 +1,7 @@
-# Fontaine Medium — requires a GPU with >= 16 GB VRAM (or FSDP/offloading).
-# Architectural target: roughly 130-160M parameters. NOT trainable on the
-# initial 16 GB RAM machine in reasonable time; provided to prove that the
-# same codebase and config schema cover larger models without code changes.
+# Fontaine Medium — a free GPU (Kaggle T4 class) is the practical trainer.
+# About 82M parameters at an 8k vocabulary. Dense: active parameters equal total.
+# Provided to prove that the same codebase and config schema cover larger
+# models without code changes. Not a reasonable CPU training target.
 model:
   architecture: decoder_transformer
   vocab_size: auto

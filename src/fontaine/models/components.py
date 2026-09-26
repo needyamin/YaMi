@@ -180,11 +180,64 @@ class FeedForward(nn.Module):
         return self.proj(F.gelu(self.fc(x)))
 
 
+class MixtureOfExperts(nn.Module):
+    """Token-choice mixture of experts replacing the dense feed-forward.
+
+    A bias-free router scores every token. Only the top
+    ``num_experts_per_token`` experts run, and only on the tokens that
+    selected them — that is the active-parameter path. Expert outputs are
+    mixed by the renormalized router weights.
+
+    The auxiliary loss is the Switch load-balance term
+    ``num_experts * sum(fraction_dispatched * mean_router_prob)``. The
+    dispatch fraction is detached so the router is trained by the soft
+    probabilities, not by the hard assignment.
+    """
+
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        self.num_experts = config.num_experts
+        self.top_k = config.num_experts_per_token
+        self.router = nn.Linear(config.hidden_size, config.num_experts, bias=False)
+        self.experts = nn.ModuleList(FeedForward(config) for _ in range(config.num_experts))
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        batch, seq_len, hidden = x.shape
+        probs = F.softmax(self.router(x), dim=-1)
+        top_v, top_i = torch.topk(probs, self.top_k, dim=-1)
+        top_v = top_v / top_v.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+
+        flat_x = x.reshape(-1, hidden)
+        flat_i = top_i.reshape(-1, self.top_k)
+        flat_v = top_v.reshape(-1, self.top_k)
+        combined = flat_x.new_zeros(flat_x.shape)
+
+        for expert_id, expert in enumerate(self.experts):
+            mask = (flat_i == expert_id).any(dim=-1)
+            if not bool(mask.any().item()):
+                continue
+            index = mask.nonzero(as_tuple=True)[0]
+            selected = expert(flat_x.index_select(0, index))
+            weights = (flat_v * (flat_i == expert_id).to(flat_v.dtype)).sum(dim=-1)
+            weighted = selected * weights.index_select(0, index).unsqueeze(-1)
+            combined = combined + combined.new_zeros(combined.shape).index_add(0, index, weighted)
+
+        n_tokens = flat_x.shape[0]
+        assignment = F.one_hot(flat_i, num_classes=self.num_experts).to(probs.dtype)
+        fraction = assignment.sum(dim=(0, 1)) / (n_tokens * self.top_k)
+        mean_prob = probs.reshape(-1, self.num_experts).mean(dim=0)
+        aux = self.num_experts * (fraction.detach() * mean_prob).sum()
+        return combined.view(batch, seq_len, hidden), aux
+
+
 class TransformerBlock(nn.Module):
     """Pre-norm Transformer block: x + attn(norm(x)); x + mlp(norm(x)).
 
     Pre-norm (normalize before the sublayer) is standard for deep stacks:
     it keeps residual paths clean and trains stably without warm-start tricks.
+    ``num_experts > 1`` swaps the dense MLP for :class:`MixtureOfExperts`.
+    The forward return is ``(hidden, aux_loss)`` so gradient checkpointing
+    keeps the load-balance term in the graph. Dense blocks return a zero aux.
     """
 
     def __init__(self, config: ModelConfig, layer_idx: int) -> None:
@@ -192,7 +245,11 @@ class TransformerBlock(nn.Module):
         self.attn_norm = build_norm(config.hidden_size, config.normalization, config.norm_eps)
         self.attn = CausalSelfAttention(config, layer_idx)
         self.mlp_norm = build_norm(config.hidden_size, config.normalization, config.norm_eps)
-        self.mlp = FeedForward(config)
+        self.mlp: FeedForward | MixtureOfExperts
+        if config.num_experts > 1:
+            self.mlp = MixtureOfExperts(config)
+        else:
+            self.mlp = FeedForward(config)
         self.resid_dropout = nn.Dropout(config.dropout)
 
     def forward(
@@ -200,7 +257,11 @@ class TransformerBlock(nn.Module):
         x: torch.Tensor,
         rope: tuple[torch.Tensor, torch.Tensor],
         cache: KVCache | None = None,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         x = x + self.resid_dropout(self.attn(self.attn_norm(x), rope, cache))
+        if isinstance(self.mlp, MixtureOfExperts):
+            y, aux = self.mlp(self.mlp_norm(x))
+            x = x + self.resid_dropout(y)
+            return x, aux
         x = x + self.resid_dropout(self.mlp(self.mlp_norm(x)))
-        return x
+        return x, x.new_zeros(())
