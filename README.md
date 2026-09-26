@@ -1,180 +1,96 @@
 # Fontaine AI
 
-**A modular, config-driven foundation-model platform that starts small
-(single machine, 16 GB RAM) and scales toward large language models —
-without rewriting the codebase.**
+A config-driven decoder-only language model (RoPE, grouped-query attention, SwiGLU, RMSNorm) that trains on one 16 GB machine and scales by changing YAML, not the code.
 
-Fontaine AI is a decoder-only Transformer LLM (RoPE, grouped-query attention,
-SwiGLU, RMSNorm) with a complete, professional toolchain: streaming data
-pipeline, tokenizer subsystem, training engine, integrity-checked
-checkpointing, registry-based evaluation, KV-cached inference, and a CLI.
+Chat name: **Yami v1.0**. Full guide: [docs/information.html](docs/information.html).
 
+## Models
 
-## Architecture at a glance
+Counts at an 8k vocabulary. Coding rows are mixture-of-experts: every expert is stored, and only the top experts run per token. Train with `data.sequence_length` equal to that model's context. `fontaine model inspect` prints the exact counts.
 
-```mermaid
-flowchart LR
-    A[Raw Data] --> B[Clean · Dedup · Filter]
-    B --> C[Tokenizer]
-    C --> D[Token Shards<br/>memmap + manifest]
-    D --> E[DataLoader]
-    E --> F[FontaineModel<br/>decoder-only Transformer]
-    F --> G[Trainer<br/>AMP · accumulation · warmup+cosine]
-    G --> H[Checkpoints<br/>atomic · hash-sealed]
-    G --> I[Evaluation<br/>registry]
-    H --> J[Inference<br/>KV cache · sampling · streaming<br/>+ Ollama-compatible API]
-```
+| Config | Params | Where it runs |
+| --- | --- | --- |
+| `tiny.yaml` | ~5.2M dense | CPU, 16 GB RAM |
+| `small.yaml` | ~28M dense | modest GPU |
+| `medium.yaml` | ~82M dense | free GPU (Kaggle T4) |
+| `coding_low.yaml` | 5.7M active / 22M total | laptop CPU |
+| `coding_mid.yaml` | 39M active / 114M total | desktop CPU or a free GPU |
+| `coding_high.yaml` | 129M active / 384M total | GPU to train |
 
-Full diagrams and rationale: [docs/architecture/overview.md](docs/architecture/overview.md).
+Larger sizes (0.4B and up) are the same code behind new configs. See [docs/scaling/roadmap.md](docs/scaling/roadmap.md).
 
 ## Install
 
 ```bash
-pip install -e .            # core: torch, numpy, pyyaml
-pip install -e ".[bpe]"     # + byte-level BPE tokenizers (recommended)
-pip install -e ".[dev]"     # + pytest, ruff
+pip install -e ".[bpe]"    # torch, numpy, pyyaml, byte-level BPE
+pip install -e ".[dev]"    # pytest and ruff, for tests
 ```
 
-CPU-only PyTorch is enough to start:
-`pip install torch --index-url https://download.pytorch.org/whl/cpu`
+CPU PyTorch: `pip install torch --index-url https://download.pytorch.org/whl/cpu`
 
-> Windows note: if the `fontaine` console script is not on your PATH after
-> installing, run the CLI as `python -m fontaine.cli.main <command>` —
-> identical behavior, same arguments.
+On Windows, if `fontaine` is not on PATH, use `python -m fontaine.cli.main <command>`.
 
-## Quickstart (your own data)
+## Chat
 
 ```bash
-# 0. plan resources
+cp .env.example .env           # which checkpoint to serve, and the host ports
+docker compose up -d web webui # chat UI → http://localhost:3000  (model: Yami v1.0)
+```
+
+Open [http://localhost:3000](http://localhost:3000). The picker shows **Yami v1.0**. The API is [http://localhost:8321](http://localhost:8321) (`/api/chat`, `/api/tags`). Set the checkpoint in `.env` (`FONTAINE_CHECKPOINT`). Details: [docs/deployment/docker.md](docs/deployment/docker.md).
+
+## Train
+
+Put text or JSONL in `datasets/raw`, then:
+
+```bash
+# 0. plan resources (active and total parameters, training memory)
 fontaine model inspect --model-config configs/model/tiny.yaml
 
-# 1. train a tokenizer on your corpus (char for dev, hf_bpe for real runs)
-fontaine tokenizer train \
-  --data-config configs/data/default.yaml --tokenizer-dir datasets/tokenizer \
+# 1. train a tokenizer on your corpus (hf_bpe for real runs, char for dev)
+fontaine tokenizer train --data-config configs/data/default.yaml \
+  --tokenizer-dir datasets/tokenizer \
   --set 'data.raw_paths=["datasets/raw"]' --set tokenizer.type=hf_bpe
 
 # 2. validate + prepare shards + manifest
 fontaine data validate --data-config configs/data/default.yaml \
   --set 'data.raw_paths=["datasets/raw"]'
-fontaine data prepare \
-  --data-config configs/data/default.yaml --tokenizer-dir datasets/tokenizer \
+fontaine data prepare --data-config configs/data/default.yaml \
+  --tokenizer-dir datasets/tokenizer \
   --set 'data.raw_paths=["datasets/raw"]' --license "CC-BY-4.0"
 
-# 3. train — point at the manifest you just prepared
-fontaine train \
-  --model-config configs/model/tiny.yaml \
+# 3. train — must point at the manifest from step 2 (otherwise the dataset is empty)
+fontaine train --model-config configs/model/tiny.yaml \
   --training-config configs/training/local.yaml \
   --data-config configs/data/default.yaml \
   --tokenizer-dir datasets/tokenizer \
   --set data.manifest_path=datasets/prepared/manifest.json
 
-# 4. generate (streaming)
+# 4. generate (streaming). checkpoints/ uses latest.json; or pass a step_ folder
 fontaine generate --checkpoint experiments/<run>/checkpoints \
   --tokenizer-dir datasets/tokenizer --interactive
 
-# 5. evaluate / serve
+# 5. evaluate / serve (picker name: Yami v1.0)
 fontaine evaluate --checkpoint experiments/<run>/checkpoints \
   --tokenizer-dir datasets/tokenizer
 fontaine serve --checkpoint experiments/<run>/checkpoints \
   --tokenizer-dir datasets/tokenizer
 ```
 
-Every command accepts `--config file.yaml` (repeatable) and
-`--set section.key=value` overrides — no source edits, ever.
+Reference tiny run on CodeAlpaca: 5,000 steps, `val_loss` 2.14, perplexity 8.5.
 
-Two paths the loader accepts for `--checkpoint`: a checkpoints root such as
-`experiments/<run>/checkpoints` (auto-resolves the newest step via
-`latest.json`) or an exact step directory like
-`experiments/<run>/checkpoints/step_00005000`.
+No local GPU: [docs/kaggle.md](docs/kaggle.md).
 
-> Gotcha: passing neither `data.manifest_path` nor `data.raw_paths` to
-> `train` re-runs preparation from an empty path list and produces an empty
-> dataset. Step 3 above is the safe form.
+## Repo
 
-Verified end-to-end on the reference machine (CodeAlpaca-20k → hf_bpe
-tokenizer → tiny model, 5,000 steps on CPU): final `val_loss` 2.14,
-perplexity 8.5 — see `experiments/*/summary.json`.
-
-## Docker: train and chat in the browser
-
-The stack runs in one CPU container plus [Open WebUI](https://github.com/open-webui/open-webui)
-— the open-source Ollama chat interface. `fontaine serve` speaks the
-Ollama API (`/api/chat`, `/api/generate`, `/api/tags`), so any
-Ollama-compatible UI or client connects to your checkpoint with no model
-conversion. The model picker shows **Yami v1.0**. The native `/generate`
-JSON/SSE API stays for tooling.
-
-```bash
-cp .env.example .env             # pick the checkpoint to serve + host ports
-docker compose up -d web webui   # build + start → http://localhost:3000
-docker compose run --rm train    # one training run (writes to host folders)
-```
-
-Weights, tokenizer, and prepared data are bind-mounted, never baked in —
-a new training run needs no rebuild. Full guide:
-[docs/deployment/docker.md](docs/deployment/docker.md).
-
-## Kaggle: train on a free GPU, download the checkpoints
-
-No local GPU? Upload your corpus as a private Kaggle Dataset, import
-`kaggle/train_fontaine_kaggle.ipynb`, and Run All on a T4 — the notebook
-trains the tokenizer, prepares the shards, trains the model with
-`configs/training/kaggle.yaml`, and zips checkpoints + tokenizer into
-`/kaggle/working` for one-click download. Step-by-step:
-[docs/kaggle.md](docs/kaggle.md).
-
-## Getting data in
-
-Raw corpora: `.txt` (blank-line separated documents), `.jsonl` (one document
-per line; `text` field or instruction/response pairs), `.json`, `.csv`.
-Converters live in `tools/` — e.g. `tools/prepare_codealpaca.py` turns the
-CodeAlpaca-20k download into Alpaca-template JSONL:
-
-```bash
-python tools/prepare_codealpaca.py \
-  --input datasets/downloads/code_alpaca_20k.json \
-  --output datasets/raw/codealpaca_20k.jsonl
-```
-
-A single project guide (data, training, model sizes, and browser chat) lives at
-[docs/information.html](https://needyamin.github.io/YaMi/docs/information.html).
-
-## Scaling path
-
-| Stage | Params | Hardware |
-| --- | --- | --- |
-| Fontaine Tiny | ~5.2 M dense | CPU / 16 GB RAM — **works today** |
-| Fontaine Small | ~28 M dense | modest GPU — free Kaggle T4 |
-| Fontaine Medium | ~82 M dense | free GPU — Kaggle T4 |
-| Coding Low | 5.7 M active / 22 M total | laptop CPU, 16 GB RAM |
-| Coding Mid | 39 M active / 114 M total | desktop CPU or a free GPU |
-| Coding High | 129 M active / 384 M total | workstation CPU to run; GPU to train |
-| Fontaine Large → XL | 0.4–4 B | multi-GPU (DDP → FSDP) |
-| Distributed Fontaine | 8 B+ | multi-node, TP/PP, sharded everything |
-
-Dense counts assume an 8k vocabulary (`fontaine model inspect` prints the
-exact active and total counts for any config). Coding sizes are
-mixture-of-experts: every expert is stored, and only the top-1 or top-2
-experts run per token, so a laptop pays the active cost. Configs:
-`configs/model/coding_low.yaml`, `coding_mid.yaml`, `coding_high.yaml`.
-Train each with `data.sequence_length` equal to that model's context.
-
-Sizes are YAML files, not code branches. The seams (`TrainingStrategy`,
-`Tokenizer`, evaluator registry, `build_model`, checkpoint format v1) are the
-migration path — see [docs/scaling/roadmap.md](docs/scaling/roadmap.md) and
-[docs/development/roadmap.md](docs/development/roadmap.md).
-
-## Repository
-
-Source in `src/fontaine/`, configs in `configs/`, tests in `tests/` (116
-tests, CPU-only, minutes), docs in `docs/`, dataset converter gadgets in
-`tools/`, and the Kaggle GPU training notebook in `kaggle/`. Datasets,
-checkpoints, experiments, and logs are artifacts — never
-committed. Full layout contract:
-[docs/architecture/repository-layout.md](docs/architecture/repository-layout.md).
+| Path | What it is |
+| --- | --- |
+| `src/fontaine/` | model, data, train, serve |
+| `configs/` | model sizes and training |
+| `tests/` | 116 CPU tests |
+| `docs/` | design and how-to |
+| `datasets/`, `experiments/`, `checkpoints/` | your data and weights; not committed |
 
 ## License
 
-MIT — see [LICENSE](LICENSE). This covers the *code*; your training data and
-resulting model weights are governed by your data choices (see
-[docs/development/security.md](docs/development/security.md)).
+MIT for the code — [LICENSE](LICENSE). Your data and weights follow the license of the data you train on ([docs/development/security.md](docs/development/security.md)).

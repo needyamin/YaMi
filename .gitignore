@@ -44,5 +44,6 @@ kaggle.json
 .vscode/
 .DS_Store
 
-# ---- Local agent memory (never commit; see .cursor/rules/context-memory.mdc) ----
+# ---- Local Cursor agent files (never commit) ----
+.cursor/
 CONTEXT_MEMORY.txt
