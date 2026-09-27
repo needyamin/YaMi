@@ -76,7 +76,7 @@ def test_type_mismatch_rejected():
 def test_model_validation_divisibility():
     with pytest.raises(ConfigError, match="divisible"):
         ModelConfig(hidden_size=100, num_attention_heads=8).validate()
-    with pytest.raises(ConfigError, match="multiple"):
+    with pytest.raises(ConfigError, match="not divisible"):
         ModelConfig(num_attention_heads=4, num_kv_heads=3).validate()
 
 

@@ -56,6 +56,7 @@ def _add_config_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="KEY=VALUE",
         help="override any config value, e.g. --set training.max_steps=10",
     )
+    parser.add_argument("--profile", default=None, help="named profile defined in the config file")
 
 
 def _load(args: argparse.Namespace) -> FontaineConfig:
@@ -64,7 +65,7 @@ def _load(args: argparse.Namespace) -> FontaineConfig:
         value = getattr(args, flag)
         if value:
             files.append(value)
-    return load_fontaine_config(files, overrides=args.set)
+    return load_fontaine_config(files, overrides=args.set, profile=getattr(args, "profile", None))
 
 
 # -- data --------------------------------------------------------------------
@@ -287,17 +288,43 @@ def cmd_model_recommend(args: argparse.Namespace) -> int:
 # -- train ---------------------------------------------------------------------
 
 
+def resolve_resume_target(resume_path: Path) -> tuple[Path, str | Path]:
+    """Map a ``--resume`` path to ``(experiment_dir, checkpoint_source)``.
+
+    ``experiments/<run>/checkpoints`` holds ``latest.json``. The experiment
+    directory is that folder's parent. A ``step_*`` directory holds
+    ``meta.json``; the experiment directory is the parent of ``checkpoints``.
+    """
+    resume_path = Path(resume_path)
+    if (resume_path / "latest.json").is_file():
+        return resume_path.parent, "latest"
+    if (resume_path / "best.json").is_file():
+        return resume_path.parent, "best"
+    if (resume_path / "meta.json").is_file():
+        return resume_path.parent.parent, resume_path
+    raise ConfigError(f"--resume {resume_path} is not a checkpoints directory")
+
+
+def dataloader_workers(device) -> int:
+    """Two workers once the run is on CUDA. CPU and MPS stay on the main process."""
+    return 2 if device.type == "cuda" else 0
+
+
 def cmd_train(args: argparse.Namespace) -> int:
     import torch
     from torch.utils.data import DataLoader
 
     from fontaine.data import TokenShardDataset
     from fontaine.data.manifest import DatasetManifest
-    from fontaine.models import build_model
+    from fontaine.distributed.runtime import build_trainable_model
     from fontaine.tokenizer.registry import load_tokenizer, resolve_vocab_size
     from fontaine.training import ExperimentRun, Trainer
 
     config = _load(args)
+    if config.training.stage in ("preference_training", "reinforcement_learning"):
+        from fontaine.training.stages import run_post_training
+
+        return run_post_training(config, args.tokenizer_dir)
     tokenizer = load_tokenizer(args.tokenizer_dir)
     # "auto" adopts the tokenizer's vocab size; explicit values must match it.
     config.model.vocab_size = resolve_vocab_size(config.model, tokenizer)
@@ -320,8 +347,9 @@ def cmd_train(args: argparse.Namespace) -> int:
             "training dataset is empty — add more data or reduce data.sequence_length"
         )
 
-    device_hint = config.training.device
-    num_workers = 0 if device_hint in ("cpu", "auto") else 2
+    from fontaine.optimization import resolve_device
+
+    num_workers = dataloader_workers(resolve_device(config.training.device))
     train_loader = DataLoader(
         train_dataset, batch_size=config.training.batch_size, shuffle=True,
         num_workers=num_workers, drop_last=True,
@@ -335,23 +363,12 @@ def cmd_train(args: argparse.Namespace) -> int:
     if eval_loader is None:
         logger.warning("no validation split; evaluation metrics will be unavailable")
 
-    model = build_model(config.model)
+    model = build_trainable_model(config)
 
     resume_dir = None
     resume_source = None
     if args.resume:
-        resume_path = Path(args.resume)
-        if (resume_path / "latest.json").is_file():
-            resume_dir = resume_path.parent.parent  # checkpoints/ -> run dir
-            resume_source = "latest"
-        elif (resume_path / "best.json").is_file():
-            resume_dir = resume_path.parent.parent
-            resume_source = "best"
-        elif (resume_path / "meta.json").is_file():
-            resume_dir = resume_path.parent.parent
-            resume_source = resume_path
-        else:
-            raise ConfigError(f"--resume {args.resume} is not a checkpoints directory")
+        resume_dir, resume_source = resolve_resume_target(Path(args.resume))
         logger.info("resuming from %s (%s)", resume_source, resume_dir)
 
     run = ExperimentRun.create(
@@ -386,7 +403,10 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     config = _load(args)
     # Metrics stay comparable with training when weights are not quantized.
     config.inference.precision = "fp32"
-    generator = load_generator(args.checkpoint, args.tokenizer_dir, config.inference, device="cpu")
+    generator = load_generator(
+        args.checkpoint, args.tokenizer_dir, config.inference, device="cpu",
+        distributed=config.distributed,
+    )
     context = EvalContext(
         device="cpu",
         tokenizer=generator.tokenizer,
@@ -423,7 +443,10 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
     config = _load(args)
     _apply_runtime_flags(config, args)
-    generator = load_generator(args.checkpoint, args.tokenizer_dir, config.inference, device=args.device)
+    generator = load_generator(
+        args.checkpoint, args.tokenizer_dir, config.inference, device=args.device,
+        distributed=config.distributed,
+    )
     if args.interactive:
         print("interactive generation — empty line exits")
         while True:
@@ -504,13 +527,148 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     config = _load(args)
     _apply_runtime_flags(config, args)
-    generator = load_generator(args.checkpoint, args.tokenizer_dir, config.inference, device=args.device)
+    generator = load_generator(
+        args.checkpoint, args.tokenizer_dir, config.inference, device=args.device,
+        distributed=config.distributed,
+    )
     serve(
         generator,
         host=config.inference.server_host,
         port=config.inference.server_port,
         model_name=config.inference.model_name,
     )
+    return 0
+
+
+def _numeric_model(config):
+    if isinstance(config.model.vocab_size, str):
+        config.model.vocab_size = 8192
+        print("note: model.vocab_size=auto — using nominal 8192 for estimates")
+    return config
+
+
+def cmd_model_validate(args: argparse.Namespace) -> int:
+    from fontaine.models.registry import registry_record
+
+    config = _numeric_model(_load(args))
+    record = registry_record(config.model, precision=config.training.precision)
+    print("config OK")
+    print(json.dumps(record, indent=2))
+    return 0
+
+
+def cmd_model_estimate(args: argparse.Namespace) -> int:
+    from fontaine.optimization.memory import (
+        estimate_inference_memory,
+        estimate_kv_cache_bytes,
+        estimate_parameter_count,
+        estimate_training_memory,
+        format_bytes,
+    )
+
+    config = _numeric_model(_load(args))
+    counts = estimate_parameter_count(config.model)
+    labels = [
+        ("Embedding parameters", "embedding"),
+        ("Attention parameters", "attention"),
+        ("Q parameters", "q"),
+        ("K parameters", "k"),
+        ("V parameters", "v"),
+        ("O projection parameters", "o"),
+        ("Dense FFN parameters", "dense_ffn"),
+        ("MoE expert parameters", "moe_experts"),
+        ("Router parameters", "router"),
+        ("Shared expert parameters", "shared_experts"),
+        ("Normalization parameters", "normalization"),
+        ("LM head parameters", "lm_head"),
+        ("Total parameters", "total"),
+        ("Active parameters per token", "active"),
+    ]
+    for label, key in labels:
+        print(f"{label}: {counts[key]:,}")
+    training = estimate_training_memory(
+        config.model,
+        batch_size=config.training.batch_size,
+        sequence_length=min(config.data.sequence_length, config.model.max_sequence_length),
+        gradient_checkpointing=config.training.gradient_checkpointing,
+    )
+    inference = estimate_inference_memory(config.model, "fp32")
+    print(f"Estimated optimizer memory: {format_bytes(training.optimizer_bytes)}")
+    print(f"Estimated parameter memory: {format_bytes(training.parameters_bytes)}")
+    print(f"Estimated activation memory: {format_bytes(training.activations_bytes)}")
+    print(
+        "Estimated KV-cache memory: "
+        f"{format_bytes(estimate_kv_cache_bytes(config.model))} "
+        f"(inference, full context; not added to the training total)"
+    )
+    print(f"Approximate total training memory: {format_bytes(training.total_bytes)}")
+    if counts["active"] != counts["total"]:
+        print("active parameters differ from total parameters")
+    print(f"Inference weight memory (fp32): {format_bytes(inference['weights'])}")
+    return 0
+
+
+def cmd_model_feasibility(args: argparse.Namespace) -> int:
+    from fontaine.optimization.feasibility import assess
+    from fontaine.optimization.hardware import detect_hardware
+
+    config = _numeric_model(_load(args))
+    report = assess(config, detect_hardware(), world_size=args.world_size)
+    print("\n".join(report.lines()))
+    return 0
+
+
+def cmd_hardware_inspect(args: argparse.Namespace) -> int:
+    from fontaine.optimization.hardware import detect_hardware
+    from fontaine.optimization.memory import format_bytes
+
+    info = detect_hardware()
+    ram = format_bytes(info.total_ram_bytes) if info.total_ram_bytes else "unknown"
+    available = format_bytes(info.available_ram_bytes) if info.available_ram_bytes else "unknown"
+    print(f"CPU: {info.cpu_name or 'unknown'}")
+    print(f"CPU capability: {info.cpu_capability}")
+    print(f"logical cores: {info.logical_cores or 'unknown'}")
+    print(f"RAM: {ram}")
+    print(f"available system memory: {available}")
+    print(f"GPU count: {info.gpu_count}")
+    if info.gpus:
+        for gpu in info.gpus:
+            print(f"GPU {gpu.index}: {gpu.name}  VRAM {format_bytes(gpu.memory_bytes)}")
+    else:
+        print("GPU model: none")
+        print("VRAM: none")
+    print(f"CUDA availability: {'yes' if info.cuda else 'no'}")
+    print(f"accelerator backend: {info.backend}")
+    print(f"interconnect: {info.interconnect}")
+    print(f"supported precision: {', '.join(info.precisions)}")
+    print(f"available attention kernels: {', '.join(info.attention_kernels)}")
+    return 0
+
+
+def cmd_distributed_plan(args: argparse.Namespace) -> int:
+    from fontaine.distributed.topology import plan_topology
+    from fontaine.optimization.hardware import detect_hardware
+
+    config = _numeric_model(_load(args))
+    info = detect_hardware()
+    world = args.world_size or info.gpu_count or 1
+    topology = plan_topology(config.model, world)
+    print(f"world size: {topology.world_size}")
+    print(f"Data Parallel: {topology.data_parallel}")
+    print(f"Tensor Parallel: {topology.tensor_parallel}")
+    print(f"Pipeline Parallel: {topology.pipeline_parallel}")
+    print(f"Sequence Parallel: {topology.sequence_parallel}")
+    print(f"Expert Parallel: {topology.expert_parallel}")
+    print("This plan was not launched. Pass the sizes in the distributed section and start torchrun yourself.")
+    return 0
+
+
+def cmd_benchmark(args: argparse.Namespace) -> int:
+    from fontaine.optimization.benchmark import run_benchmarks
+
+    config = _numeric_model(_load(args))
+    result = run_benchmarks(config.model, allow_large=args.allow_large)
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -563,6 +721,33 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_model_inspect)
     p = model_sub.add_parser("recommend", help="pick a Yami size tier for this machine")
     p.set_defaults(func=cmd_model_recommend)
+    p = model_sub.add_parser("validate", help="validate a config without building the model")
+    _add_config_arguments(p)
+    p.set_defaults(func=cmd_model_validate)
+    p = model_sub.add_parser("estimate-params", help="parameter and memory estimates")
+    _add_config_arguments(p)
+    p.set_defaults(func=cmd_model_estimate)
+    p = model_sub.add_parser("feasibility", help="compare a config to this machine")
+    _add_config_arguments(p)
+    p.add_argument("--world-size", type=int, default=None)
+    p.set_defaults(func=cmd_model_feasibility)
+
+    hardware = sub.add_parser("hardware", help="machine inspection")
+    hardware_sub = hardware.add_subparsers(dest="hardware_command", required=True)
+    p = hardware_sub.add_parser("inspect", help="CPU, RAM, GPU, precision, attention kernels")
+    p.set_defaults(func=cmd_hardware_inspect)
+
+    distributed = sub.add_parser("distributed", help="parallelism planning")
+    distributed_sub = distributed.add_subparsers(dest="distributed_command", required=True)
+    p = distributed_sub.add_parser("plan", help="suggest a topology; does not launch training")
+    _add_config_arguments(p)
+    p.add_argument("--world-size", type=int, default=None)
+    p.set_defaults(func=cmd_distributed_plan)
+
+    benchmark = sub.add_parser("benchmark", help="time a tiny forward and backward")
+    _add_config_arguments(benchmark)
+    benchmark.add_argument("--allow-large", action="store_true")
+    benchmark.set_defaults(func=cmd_benchmark)
 
     train = sub.add_parser("train", help="train a model")
     _add_config_arguments(train)

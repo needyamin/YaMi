@@ -1,0 +1,223 @@
+# YaMi scalable architecture. The top-level sections are shared.
+# `profile: tiny` is the default. Select another size with --profile.
+# Parameter counts come from the estimator, not from the profile name.
+profile: tiny
+
+model:
+  vocab_size: 32000
+  activation: swiglu
+  normalization: rmsnorm
+  tie_word_embeddings: true
+  qk_norm: true
+  rope_theta: 500000.0
+  dropout: 0.0
+  attention:
+    type: gqa
+    backend: auto
+  kernel: auto
+  architecture_version: "1"
+  modalities: [text]
+
+optimizer:
+  type: adamw
+  learning_rate: 0.0003
+  betas: [0.9, 0.95]
+  eps: 1.0e-8
+  weight_decay: 0.1
+
+scheduler:
+  type: cosine
+  warmup_steps: 100
+  min_lr_ratio: 0.1
+
+training:
+  precision: bf16
+  gradient_checkpointing: true
+  sharding: none
+  stage: pretraining
+
+distributed:
+  data_parallel_size: 1
+  tensor_parallel_size: 1
+  pipeline_parallel_size: 1
+  sequence_parallel_size: 1
+  expert_parallel_size: 1
+
+profiles:
+  tiny:
+    model:
+      architecture: decoder_transformer
+      hidden_size: 256
+      num_layers: 4
+      num_attention_heads: 4
+      num_kv_heads: 2
+      intermediate_size: 512
+      max_sequence_length: 512
+      num_experts: 1
+  small:
+    model:
+      architecture: decoder_transformer
+      hidden_size: 512
+      num_layers: 8
+      num_attention_heads: 8
+      num_kv_heads: 4
+      intermediate_size: 1536
+      max_sequence_length: 1024
+      num_experts: 1
+  medium:
+    model:
+      architecture: decoder_transformer
+      hidden_size: 768
+      num_layers: 12
+      num_attention_heads: 12
+      num_kv_heads: 4
+      intermediate_size: 2048
+      max_sequence_length: 2048
+      sliding_window: 512
+      attention:
+        type: hybrid
+        backend: auto
+      layer_pattern: [full, sliding, sliding, sparse]
+      sparse_pattern: global-local
+      sparse_window: 256
+      sparse_global_tokens: 16
+      num_experts: 1
+  500m:
+    model:
+      architecture: decoder_transformer
+      hidden_size: 1280
+      num_layers: 24
+      num_attention_heads: 10
+      num_kv_heads: 2
+      explicit_head_dim: 128
+      intermediate_size: 3456
+      max_sequence_length: 4096
+      num_experts: 1
+  1b:
+    model:
+      architecture: decoder_transformer
+      hidden_size: 2048
+      num_layers: 22
+      num_attention_heads: 16
+      num_kv_heads: 4
+      intermediate_size: 5632
+      max_sequence_length: 4096
+      num_experts: 1
+  3b:
+    model:
+      architecture: decoder_transformer
+      hidden_size: 3072
+      num_layers: 28
+      num_attention_heads: 24
+      num_kv_heads: 4
+      intermediate_size: 8192
+      max_sequence_length: 4096
+      num_experts: 1
+  7b:
+    model:
+      architecture: decoder_transformer
+      hidden_size: 4096
+      num_layers: 32
+      num_attention_heads: 32
+      num_kv_heads: 8
+      intermediate_size: 11008
+      max_sequence_length: 8192
+      num_experts: 1
+  14b:
+    model:
+      architecture: decoder_transformer
+      hidden_size: 5120
+      num_layers: 48
+      num_attention_heads: 40
+      num_kv_heads: 8
+      intermediate_size: 13824
+      max_sequence_length: 8192
+      num_experts: 1
+  30b:
+    model:
+      architecture: moe_decoder
+      hidden_size: 4096
+      num_layers: 32
+      num_attention_heads: 32
+      num_kv_heads: 8
+      intermediate_size: 4096
+      expert_intermediate_size: 4096
+      max_sequence_length: 8192
+      num_experts: 16
+      num_experts_per_token: 2
+      num_shared_experts: 1
+      expert_capacity_factor: 1.25
+      router:
+        type: top_k
+        load_balancing:
+          enabled: true
+          coefficient: 0.01
+  70b:
+    model:
+      architecture: moe_decoder
+      hidden_size: 4096
+      num_layers: 44
+      num_attention_heads: 32
+      num_kv_heads: 8
+      intermediate_size: 4096
+      expert_intermediate_size: 4096
+      max_sequence_length: 8192
+      rope_scaling_type: linear
+      rope_scaling_factor: 2.0
+      rope_original_context_length: 4096
+      num_experts: 32
+      num_experts_per_token: 4
+      num_shared_experts: 1
+      expert_capacity_factor: 1.25
+      router:
+        type: top_k
+        load_balancing:
+          enabled: true
+          coefficient: 0.01
+  100b:
+    model:
+      architecture: moe_decoder
+      hidden_size: 4096
+      num_layers: 40
+      num_attention_heads: 32
+      num_kv_heads: 8
+      intermediate_size: 5120
+      expert_intermediate_size: 5120
+      max_sequence_length: 8192
+      num_experts: 40
+      num_experts_per_token: 4
+      num_shared_experts: 1
+      expert_capacity_factor: 1.25
+  300b:
+    model:
+      architecture: moe_decoder
+      hidden_size: 4096
+      num_layers: 48
+      num_attention_heads: 32
+      num_kv_heads: 8
+      intermediate_size: 6144
+      expert_intermediate_size: 6144
+      max_sequence_length: 8192
+      num_experts: 80
+      num_experts_per_token: 8
+      num_shared_experts: 1
+      expert_capacity_factor: 1.25
+  1t:
+    model:
+      architecture: moe_decoder
+      hidden_size: 4096
+      num_layers: 64
+      num_attention_heads: 32
+      num_kv_heads: 8
+      intermediate_size: 6144
+      expert_intermediate_size: 6144
+      max_sequence_length: 8192
+      num_experts: 256
+      num_experts_per_token: 8
+      num_shared_experts: 1
+      expert_capacity_factor: 1.25
+      router:
+        type: top_k
+        load_balancing:
+          enabled: true
+          coefficient: 0.01

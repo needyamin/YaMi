@@ -25,6 +25,8 @@ Dense rows are counted at an 8k vocabulary; coding and Yami rows use the vocabul
 
 Yami rows are counted at a 32k vocabulary. They add QK-norm, and Base and Large add sliding-window attention. The server loads them as int8 on CPU (`--precision auto`), so Large uses about 1.3 GB of weights. `fontaine model recommend` picks the tier for your machine. See [docs/scaling/roadmap.md](docs/scaling/roadmap.md).
 
+`configs/yami_super.yaml` adds a second ladder, from a 10.6M `tiny` profile to a 1.24T-parameter mixture-of-experts `1t` profile. Those names are targets. `model estimate-params --profile <name>` prints the real counts without allocating the model. Larger than `tiny` was planned, not trained. See [docs/scaling/yami-super.md](docs/scaling/yami-super.md).
+
 ## Install
 
 ```bash
@@ -53,6 +55,7 @@ Put data in `datasets/raw`: text, Markdown, code, JSONL/JSON/CSV/Parquet (plain,
 ```bash
 # 0. plan resources (active and total parameters, training memory)
 fontaine model inspect --model-config configs/model/tiny.yaml
+fontaine model estimate-params --config configs/yami_super.yaml --profile 7b
 
 # 1. train a tokenizer on your corpus (hf_bpe for real runs, char for dev)
 fontaine tokenizer train --data-config configs/data/default.yaml \
@@ -94,7 +97,7 @@ No local GPU: [docs/kaggle.md](docs/kaggle.md).
 | --- | --- |
 | `src/fontaine/` | model, data, train, serve |
 | `configs/` | model sizes and training |
-| `tests/` | 172 CPU tests |
+| `tests/` | 211 CPU tests |
 | `docs/` | design and how-to |
 | `datasets/`, `experiments/`, `checkpoints/` | your data and weights; not committed |
 

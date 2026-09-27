@@ -265,12 +265,13 @@
                         </p>
 
                         <ul>
-                            <li>Transformer: RoPE, GQA, SwiGLU, RMSNorm, QK-norm, sliding-window attention, mixture-of-experts</li>
-                            <li>Size ladder: Yami Nano 25M, Small 115M, Base 323M, Large 1.06B</li>
+                            <li>Transformer: RoPE, GQA, SwiGLU, RMSNorm, QK-norm, sliding-window and sparse attention, mixture-of-experts with shared experts</li>
+                            <li>Size ladder: Yami Nano 25M through Large 1.06B, plus <code>configs/yami_super.yaml</code> (10.6M tested, up to a 1.24T mixture-of-experts estimate)</li>
                             <li>Tokenizer: byte-level BPE and char</li>
-                            <li>Data: text, code, JSONL/JSON/CSV/Parquet, zip/tar archives</li>
-                            <li>Training and checkpointing</li>
-                            <li>Inference: KV cache, int8/bf16/fp32, thread control, Ollama-compatible API</li>
+                            <li>Data: text, code, JSONL/JSON/CSV/Parquet, zip/tar archives, mixtures, packing, quality filters</li>
+                            <li>Training stages: pretraining, supervised fine-tuning, DPO, REINFORCE on a provided answer</li>
+                            <li>Parallelism in config: data, tensor, pipeline, sequence, and expert parallel; FSDP and optimizer sharding; per-rank checkpoints</li>
+                            <li>Inference: static, dynamic, and paged KV cache; fp32, fp16, bf16, int8, int4; greedy speculative decoding; Ollama-compatible API</li>
                         </ul>
                     </div>
                 </div>

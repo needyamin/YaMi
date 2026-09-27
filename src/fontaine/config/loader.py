@@ -11,6 +11,7 @@ work) and fall back to raw strings otherwise.
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Any, TypeVar, Union, get_args, get_origin
 
@@ -19,6 +20,7 @@ import yaml
 from fontaine.config.errors import ConfigError
 from fontaine.config.schema import (
     DataConfig,
+    DistributedConfig,
     EvaluationConfig,
     FontaineConfig,
     InferenceConfig,
@@ -36,7 +38,10 @@ _SECTION_TYPES = {
     "training": TrainingConfig,
     "evaluation": EvaluationConfig,
     "inference": InferenceConfig,
+    "distributed": DistributedConfig,
 }
+
+_META_KEYS = ("extends", "profile", "profiles")
 
 
 def load_yaml_dict(path: str | Path) -> dict[str, Any]:
@@ -165,11 +170,208 @@ def _coerce(annotation: Any, value: Any, dotted: str) -> Any:
     return value
 
 
+def _env_overrides() -> list[str]:
+    """Overrides from ``YAMI_SET`` or ``FONTAINE_SET`` (space-separated ``k=v``)."""
+    raw = os.environ.get("YAMI_SET") or os.environ.get("FONTAINE_SET") or ""
+    return [part for part in raw.split() if part]
+
+
+def _fold_optimizer_scheduler(data: dict[str, Any], source: str) -> dict[str, Any]:
+    """Move top-level ``optimizer`` / ``scheduler`` blocks into ``training``."""
+    result = dict(data)
+    training = dict(result.get("training") or {})
+    optimizer = result.pop("optimizer", None)
+    if optimizer is not None:
+        if not isinstance(optimizer, dict):
+            raise ConfigError(f"{source}: optimizer must be a mapping")
+        _assign_folded(training, optimizer, source, "optimizer", {
+            "type": "optimizer",
+            "learning_rate": "learning_rate",
+            "eps": "adam_eps",
+            "weight_decay": "weight_decay",
+        })
+        if "betas" in optimizer:
+            betas = optimizer["betas"]
+            if not isinstance(betas, list) or len(betas) != 2:
+                raise ConfigError(f"{source}: optimizer.betas must be a list of two numbers")
+            _assign_folded_value(training, "adam_beta1", betas[0], source, "optimizer.betas")
+            _assign_folded_value(training, "adam_beta2", betas[1], source, "optimizer.betas")
+        unknown = set(optimizer) - {"type", "learning_rate", "eps", "weight_decay", "betas"}
+        if unknown:
+            raise ConfigError(
+                f"{source}: unknown optimizer fields {sorted(unknown)} "
+                f"(allowed: type, learning_rate, betas, eps, weight_decay)"
+            )
+    scheduler = result.pop("scheduler", None)
+    if scheduler is not None:
+        if not isinstance(scheduler, dict):
+            raise ConfigError(f"{source}: scheduler must be a mapping")
+        _assign_folded(training, scheduler, source, "scheduler", {
+            "type": "lr_scheduler",
+            "warmup_steps": "warmup_steps",
+            "min_lr_ratio": "min_learning_rate_ratio",
+        })
+        unknown = set(scheduler) - {"type", "warmup_steps", "min_lr_ratio"}
+        if unknown:
+            raise ConfigError(
+                f"{source}: unknown scheduler fields {sorted(unknown)} "
+                f"(allowed: type, warmup_steps, min_lr_ratio)"
+            )
+    if training:
+        result["training"] = training
+    return result
+
+
+def _assign_folded(
+    training: dict[str, Any],
+    block: dict[str, Any],
+    source: str,
+    block_name: str,
+    mapping: dict[str, str],
+) -> None:
+    for src, dest in mapping.items():
+        if src in block:
+            _assign_folded_value(training, dest, block[src], source, f"{block_name}.{src}")
+
+
+def _assign_folded_value(
+    training: dict[str, Any], dest: str, value: Any, source: str, origin: str
+) -> None:
+    if dest in training and training[dest] != value:
+        raise ConfigError(
+            f"{source}: {origin} conflicts with training.{dest}. "
+            f"Set the value in one place."
+        )
+    training[dest] = value
+
+
+def _flatten_model_section(model: dict[str, Any], source: str) -> dict[str, Any]:
+    """Accept nested attention/router blocks and the ``head_dim`` alias."""
+    model = dict(model)
+    if "head_dim" in model:
+        if "explicit_head_dim" in model and model["explicit_head_dim"] != model["head_dim"]:
+            raise ConfigError(f"{source}: set model.head_dim or model.explicit_head_dim, not both")
+        model["explicit_head_dim"] = model.pop("head_dim")
+    attention = model.pop("attention", None)
+    if attention is not None:
+        if not isinstance(attention, dict):
+            raise ConfigError(f"{source}: model.attention must be a mapping")
+        if "type" in attention:
+            _assign_model(model, "attention_type", attention["type"], source, "attention.type")
+        if "backend" in attention:
+            _assign_model(model, "attention_backend", attention["backend"], source, "attention.backend")
+        unknown = set(attention) - {"type", "backend"}
+        if unknown:
+            raise ConfigError(
+                f"{source}: unknown model.attention fields {sorted(unknown)} "
+                f"(allowed: type, backend)"
+            )
+    router = model.pop("router", None)
+    if router is not None:
+        if not isinstance(router, dict):
+            raise ConfigError(f"{source}: model.router must be a mapping")
+        if "type" in router:
+            _assign_model(model, "router_type", router["type"], source, "router.type")
+        balancing = router.get("load_balancing")
+        if balancing is not None:
+            if not isinstance(balancing, dict):
+                raise ConfigError(f"{source}: model.router.load_balancing must be a mapping")
+            if "enabled" in balancing:
+                _assign_model(
+                    model, "load_balancing_enabled", balancing["enabled"], source, "load_balancing.enabled"
+                )
+            if "coefficient" in balancing:
+                _assign_model(
+                    model, "moe_aux_loss_coef", balancing["coefficient"], source, "load_balancing.coefficient"
+                )
+            unknown = set(balancing) - {"enabled", "coefficient"}
+            if unknown:
+                raise ConfigError(
+                    f"{source}: unknown load_balancing fields {sorted(unknown)} "
+                    f"(allowed: enabled, coefficient)"
+                )
+        unknown = set(router) - {"type", "load_balancing"}
+        if unknown:
+            raise ConfigError(
+                f"{source}: unknown model.router fields {sorted(unknown)} "
+                f"(allowed: type, load_balancing)"
+            )
+    return model
+
+
+def _assign_model(model: dict[str, Any], dest: str, value: Any, source: str, origin: str) -> None:
+    if dest in model and model[dest] != value:
+        raise ConfigError(
+            f"{source}: model.{origin} conflicts with model.{dest}. Set the value in one place."
+        )
+    model[dest] = value
+
+
+def _prepare_file(path: Path, stack: tuple[Path, ...]) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+    """Load one file, follow ``extends``, and return sections, profiles, selected profile."""
+    resolved = path.resolve()
+    if resolved in stack:
+        chain = " -> ".join(str(item) for item in (*stack, resolved))
+        raise ConfigError(f"config extends cycle: {chain}")
+    raw = load_yaml_dict(resolved)
+    extends = raw.pop("extends", None)
+    selected = raw.pop("profile", None)
+    profiles = raw.pop("profiles", None)
+    if selected is not None and not isinstance(selected, str):
+        raise ConfigError(f"{resolved}: profile must be a string name")
+    parent_sections: dict[str, Any] = {}
+    merged_profiles: dict[str, Any] = {}
+    if extends is not None:
+        parent_path = Path(str(extends))
+        if not parent_path.is_absolute():
+            parent_path = resolved.parent / parent_path
+        parent_sections, parent_profiles, parent_selected = _prepare_file(
+            parent_path, stack + (resolved,)
+        )
+        merged_profiles.update(parent_profiles)
+        if selected is None:
+            selected = parent_selected
+    if profiles is not None:
+        if not isinstance(profiles, dict):
+            raise ConfigError(f"{resolved}: profiles must be a mapping of name to config sections")
+        for name, body in profiles.items():
+            if not isinstance(body, dict):
+                raise ConfigError(f"{resolved}: profile {name!r} must be a mapping")
+            merged_profiles[str(name)] = body
+    folded = _fold_optimizer_scheduler(raw, str(resolved))
+    sections = merge_sections([parent_sections, folded]) if parent_sections else (
+        merge_sections([folded]) if folded else {}
+    )
+    return sections, merged_profiles, selected
+
+
+def _apply_profile(
+    sections: dict[str, Any], profiles: dict[str, Any], profile: str | None, source: str
+) -> dict[str, Any]:
+    if profile is None:
+        return sections
+    if profile not in profiles:
+        known = ", ".join(sorted(profiles)) or "(none)"
+        raise ConfigError(
+            f"unknown profile {profile!r} in {source}. Available profiles: {known}."
+        )
+    body = _fold_optimizer_scheduler(profiles[profile], f"profile {profile}")
+    return merge_sections([sections, body])
+
+
+def _flatten_tree(sections: dict[str, Any]) -> dict[str, Any]:
+    result = {key: dict(value) if isinstance(value, dict) else value for key, value in sections.items()}
+    if isinstance(result.get("model"), dict):
+        result["model"] = _flatten_model_section(result["model"], "config")
+    return result
+
+
 def load_fontaine_config(
     config_files: list[str | Path] | None = None,
     overrides: list[str] | None = None,
+    profile: str | None = None,
 ) -> FontaineConfig:
-    """Load one or more YAML files, apply overrides, validate, and bind.
+    """Load one or more YAML files, apply a profile and overrides, validate, and bind.
 
     Example:
         config = load_fontaine_config(
@@ -178,10 +380,24 @@ def load_fontaine_config(
         )
     """
     config_dict: dict[str, Any] = {}
+    profiles: dict[str, Any] = {}
+    selected: str | None = None
+    sources: list[str] = []
     for path in config_files or []:
-        config_dict = merge_sections([config_dict, load_yaml_dict(path)])
-    if overrides:
-        config_dict = apply_overrides(config_dict, overrides)
+        sections, file_profiles, file_profile = _prepare_file(Path(path), ())
+        config_dict = merge_sections([config_dict, sections]) if config_dict else sections
+        profiles.update(file_profiles)
+        if file_profile is not None:
+            selected = file_profile
+        sources.append(str(path))
+    chosen = profile if profile is not None else selected
+    if chosen is not None:
+        config_dict = _apply_profile(config_dict, profiles, chosen, ", ".join(sources) or "config")
+    env_overrides = _env_overrides()
+    merged_overrides = [*env_overrides, *(overrides or [])]
+    if merged_overrides:
+        config_dict = apply_overrides(config_dict, merged_overrides)
+    config_dict = _flatten_tree(config_dict)
 
     config = FontaineConfig(
         **{

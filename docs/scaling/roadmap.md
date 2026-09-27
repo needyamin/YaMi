@@ -1,5 +1,11 @@
 # Scaling Roadmap
 
+The executable profile ladder, from a few million parameters through a
+trillion-parameter mixture-of-experts configuration, is
+[yami-super.md](yami-super.md). Counts there come from
+`model estimate-params`. A large profile is an architecture you can plan,
+not a trained model.
+
 ## Size ladder
 
 Architectural targets — not promises that any size trains on the initial
@@ -83,11 +89,11 @@ flowchart LR
 | --- | --- | --- | --- |
 | Gradient accumulation | OOM on batch | none | implemented |
 | Gradient checkpointing | OOM on activations | ~30% recompute | implemented |
-| DDP | model fits one GPU | gradient all-reduce | `DistributedDataParallelStrategy` (skeleton) |
-| FSDP/ZeRO | model > one GPU | comms + prefetching | `TrainingStrategy` |
-| Tensor parallel | layers > one GPU | all-reduce per layer, NVLink wanted | `build_model`/attention internals |
-| Pipeline parallel | depth-bound clusters | bubble/stashing | block list is already layered |
-| Distributed checkpoints | any sharded run | — | v1 format records `world_size` |
+| DDP | model fits one GPU | gradient all-reduce | `DistributedDataParallelStrategy`, or `data_parallel_size` |
+| FSDP/ZeRO | model > one GPU | comms + prefetching | `training.sharding: fsdp` or `optimizer` |
+| Tensor parallel | layers > one GPU | all-gather / all-reduce per layer | `tensor_parallel_size` |
+| Pipeline parallel | depth-bound clusters | activation and gradient send | `pipeline_parallel_size` |
+| Distributed checkpoints | tensor, pipeline, or expert parallel | one shard per rank | `model_rank{r}.pt` when those sizes are above 1 |
 | Distributed data loading | many workers | — | `DistributedSampler` already wired |
 
 ## What changes at each tier — and what doesn't

@@ -172,6 +172,42 @@ largest Yami tier that fits. When you train any config, set
 <code>data.sequence_length</code> to at most that model’s
 <code>max_sequence_length</code>. A longer data window is rejected.</p>
 
+<h2>Super profiles</h2>
+
+<p><code>configs/yami_super.yaml</code> is a second ladder in one file. Profile
+names are targets. The counts below are what
+<code>model estimate-params</code> prints at a 32k vocabulary with tied
+embeddings. The command does not allocate the model. Only <code>tiny</code>
+was constructed and benchmarked. The rest are plans: a large parameter count
+is not a trained model.</p>
+
+<table>
+  <tr><th>Profile</th><th>Parameters</th><th>Context</th><th>Training memory for that file’s micro-batch</th></tr>
+  <tr><td><code>tiny</code></td><td>10,554,112 dense</td><td>512</td><td>173.04 MiB. Tested.</td></tr>
+  <tr><td><code>small</code></td><td>41,559,552 dense</td><td>1024</td><td>658.15 MiB. Estimated.</td></tr>
+  <tr><td><code>medium</code></td><td>100,094,208 dense</td><td>2048</td><td>1.53 GiB. Estimated.</td></tr>
+  <tr><td><code>500m</code></td><td>453,905,664 dense</td><td>4096</td><td>6.82 GiB. Estimated.</td></tr>
+  <tr><td><code>1b</code></td><td>1,057,586,688 dense</td><td>4096</td><td>15.85 GiB. Needs a large GPU or a cluster to train.</td></tr>
+  <tr><td><code>3b</code></td><td>2,828,978,176 dense</td><td>4096</td><td>42.30 GiB. Estimated.</td></tr>
+  <tr><td><code>7b</code></td><td>5,802,045,440 dense</td><td>8192</td><td>86.64 GiB. Estimated.</td></tr>
+  <tr><td><code>14b</code></td><td>13,376,406,528 dense</td><td>8192</td><td>199.56 GiB. Estimated.</td></tr>
+  <tr><td><code>30b</code></td><td>28.86B total / 6.31B active</td><td>8192</td><td>430.18 GiB. Mixture of experts.</td></tr>
+  <tr><td><code>70b</code></td><td>75.06B total / 13.06B active</td><td>8192</td><td>1.09 TiB. Mixture of experts.</td></tr>
+  <tr><td><code>100b</code></td><td>105.00B total / 14.40B active</td><td>8192</td><td>1.53 TiB. Mixture of experts.</td></tr>
+  <tr><td><code>300b</code></td><td>295.69B total / 34.78B active</td><td>8192</td><td>4.30 TiB. Mixture of experts.</td></tr>
+  <tr><td><code>1t</code></td><td>1,244,665,499,648 total / 46,369,624,064 active</td><td>8192</td><td>18.11 TiB. A plan, not a model that was built.</td></tr>
+</table>
+
+<p>Mixture-of-experts rows store every expert (total) and multiply only the
+top experts plus the shared experts (active). Training memory uses the total.
+Select a profile with <code>--profile</code>. Full notes:
+<a href="scaling/yami-super.md">docs/scaling/yami-super.md</a>.</p>
+
+<pre><code>python -m fontaine.cli.main model estimate-params --config configs/yami_super.yaml --profile 7b
+python -m fontaine.cli.main model feasibility --config configs/yami_super.yaml --profile tiny
+python -m fontaine.cli.main hardware inspect
+python -m fontaine.cli.main distributed plan --config configs/yami_super.yaml --profile 7b --world-size 1</code></pre>
+
 <h2>Folders</h2>
 
 <div class="tree">datasets/
@@ -314,7 +350,7 @@ If the model writes nothing or fails, the reply says so instead of staying blank
 
 <p>On a CPU, models of 20M parameters or more load as int8 weights by default
 (<code>inference.precision: auto</code>), which cuts weight memory by about 3x.
-Override with <code>--precision fp32|bf16|int8</code> and set CPU threads with
+Override with <code>--precision fp32|fp16|bf16|int8|int4</code> and set CPU threads with
 <code>--threads N</code> on <code>serve</code> and <code>generate</code>.
 <code>/api/show</code> reports the format as <code>F32</code>, <code>BF16</code>,
 or <code>Q8_0</code>.</p>
@@ -347,9 +383,10 @@ API, and Open WebUI auth is off for local development. Do not publish ports
   <tr><td>Stop</td><td><code>docker compose down</code></td></tr>
   <tr><td>Rebuild after source changes</td><td><code>docker compose up -d --build web webui</code></td></tr>
   <tr><td>Inspect a size</td><td><code>python -m fontaine.cli.main model inspect --model-config configs/model/tiny.yaml</code></td></tr>
+  <tr><td>Count a super profile</td><td><code>python -m fontaine.cli.main model estimate-params --config configs/yami_super.yaml --profile 7b</code></td></tr>
   <tr><td>Pick a size for this machine</td><td><code>python -m fontaine.cli.main model recommend</code></td></tr>
   <tr><td>Check raw data</td><td><code>python -m fontaine.cli.main data validate --data-config configs/data/default.yaml --set 'data.raw_paths=["datasets/raw"]'</code></td></tr>
-  <tr><td>Run tests</td><td><code>python -m pytest</code> (172 CPU tests)</td></tr>
+  <tr><td>Run tests</td><td><code>python -m pytest</code> (211 CPU tests)</td></tr>
 </table>
 
 <div class="box-good"><strong>Keep together.</strong> A checkpoint only speaks

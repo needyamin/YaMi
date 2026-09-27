@@ -90,6 +90,11 @@ class ExperimentRun:
         atomic_write_json(self.directory / "environment.json", self._environment())
 
     def _environment(self) -> dict[str, Any]:
+        from dataclasses import asdict
+
+        from fontaine.optimization.hardware import detect_hardware
+
+        hardware = detect_hardware()
         return {
             "git_commit": current_git_commit(),
             "fontaine_version": __version__,
@@ -100,6 +105,28 @@ class ExperimentRun:
             "cuda_available": torch.cuda.is_available(),
             "device_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
             "seed": self.config.training.seed,
+            "precision": self.config.training.precision,
+            "optimizer": self.config.training.optimizer,
+            "scheduler": self.config.training.lr_scheduler,
+            "tokenizer": {
+                "type": self.config.tokenizer.type,
+                "vocab_size": self.config.model.vocab_size,
+            },
+            "dataset": {
+                "manifest_path": self.config.data.manifest_path,
+                "sequence_length": self.config.data.sequence_length,
+            },
+            "distributed": asdict(self.config.distributed),
+            "hardware": {
+                "logical_cores": hardware.logical_cores,
+                "total_ram_bytes": hardware.total_ram_bytes,
+                "available_ram_bytes": hardware.available_ram_bytes,
+                "cpu_name": hardware.cpu_name,
+                "backend": hardware.backend,
+                "interconnect": hardware.interconnect,
+                "precisions": list(hardware.precisions),
+                "gpu_count": hardware.gpu_count,
+            },
             "started_utc": self._start_time.isoformat(),
         }
 

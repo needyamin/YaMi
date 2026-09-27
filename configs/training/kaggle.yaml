@@ -5,11 +5,13 @@
 # device/precision "auto" resolves per hardware: bf16 on bf16-capable GPUs
 # (A100), fp16 + GradScaler on T4/P100, fp32 on the free CPU tier.
 #
-# Sizing guide (CodeAlpaca-20k-scale corpora):
-#   tiny    (4L/256h,  seq 256): minutes on a T4 — batch 64 is comfortable
-#   small   (8L/512h,  seq 512): ~1-2 h on a T4  — batch 64 fits 16 GB VRAM
-#   medium (12L/768h, seq 1024): several hours    — set batch_size 32 and
-#                                gradient_checkpointing true if memory is tight
+# The notebook overrides batch size, sequence length, and gradient
+# checkpointing from its preset table. This file is the shared GPU baseline.
+# Training uses GPU 0 only. A T4 x2 accelerator does not start a second process.
+#
+# Presets that fit a 16 GB T4 (see the notebook): tiny, small, medium,
+# coding_low, yami_nano, and yami_small with a small batch.
+# Do not train yami_large, yami_base, or yami_super profiles above tiny here.
 training:
   run_name: fontaine-kaggle
   experiments_dir: experiments
@@ -31,6 +33,6 @@ training:
   log_interval: 25
   checkpoint_interval: 2000
   keep_last_n_checkpoints: 2   # /kaggle/working persists max ~20 GB
-  early_stopping_patience: 0   # 0 = disabled
+  early_stopping_patience: 5   # stop after 5 evals with no val_loss drop; 0 disables
   seed: 42
   deterministic: false

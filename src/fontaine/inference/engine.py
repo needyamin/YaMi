@@ -15,7 +15,8 @@ import torch
 
 from fontaine.config.schema import InferenceConfig
 from fontaine.generation import SamplingConfig, sample_token
-from fontaine.models import FontaineModel, KVCache
+from fontaine.models import FontaineModel
+from fontaine.models.kv_cache import build_kv_cache
 from fontaine.optimization import resolve_device
 from fontaine.optimization.quantize import (
     QUANTIZATION_LEVELS,
@@ -73,9 +74,11 @@ class Generator:
         tokenizer: Tokenizer,
         config: InferenceConfig | None = None,
         device: str = "auto",
+        draft: FontaineModel | None = None,
     ) -> None:
         self.config = config or InferenceConfig()
         self.tokenizer = tokenizer
+        self.draft = draft
         self.device = resolve_device(device)
         self.num_threads = set_num_threads(self.config.num_threads)
         self.parameter_count = model.num_parameters()
@@ -87,7 +90,14 @@ class Generator:
         model = model.to(self.device)
         model.eval()
         self.model = apply_inference_precision(model, self.precision)
-        self.compute_dtype = torch.bfloat16 if self.precision == "bf16" else torch.float32
+        if self.precision == "bf16":
+            self.compute_dtype = torch.bfloat16
+        elif self.precision == "fp16":
+            self.compute_dtype = torch.float16
+        else:
+            self.compute_dtype = torch.float32
+        if self.draft is not None:
+            self.draft = self.draft.to(self.device).eval()
         self._lock = threading.Lock()
         logger.info(
             "inference precision=%s device=%s threads=%d parameters=%d",
@@ -213,8 +223,15 @@ class Generator:
                 )
                 sampling = replace(sampling, max_new_tokens=gen_budget)
 
-            cache = KVCache.from_config(
-                self.model.config, batch_size=1, device=self.device, dtype=self.compute_dtype
+            if self.config.speculative_tokens > 0:
+                yield from self._speculative(prompt_ids, sampling, generator)
+                return
+            cache = build_kv_cache(
+                self.model.config,
+                batch_size=1,
+                device=self.device,
+                dtype=self.compute_dtype,
+                kind=self.config.kv_cache,
             )
             input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=self.device)
             generated: list[int] = []
@@ -244,6 +261,33 @@ class Generator:
                         one = torch.tensor([[next_id]], dtype=torch.long, device=self.device)
                         logits = self.model(one, cache=cache).logits[0, -1].float()
                         cache.advance(1)
+
+
+    def _speculative(self, prompt_ids: list[int], sampling: SamplingConfig, generator: torch.Generator | None):
+        if self.draft is None:
+            raise RuntimeError(
+                "inference.speculative_tokens is set but no draft model is loaded. "
+                "Set inference.draft_checkpoint to a checkpoint directory."
+            )
+        from fontaine.inference.speculative import speculative_ids
+
+        with torch.inference_mode():
+            produced = speculative_ids(
+                self.model,
+                self.draft,
+                prompt_ids,
+                sampling,
+                self.config.speculative_tokens,
+                self.device,
+                self.compute_dtype,
+                self.tokenizer.eos_id,
+                generator,
+            )
+        if not produced:
+            return
+        text = self.tokenizer.decode(produced, skip_special_tokens=True)
+        cut = _first_stop_cut(text, sampling.stop_sequences)
+        yield cut if cut is not None else text
 
 
 def _first_stop_cut(text: str, stop_sequences: list[str]) -> str | None:

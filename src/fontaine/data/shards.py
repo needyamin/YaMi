@@ -169,7 +169,17 @@ class TokenShardDataset(Dataset):
         shard_idx, start = self._index[idx]
         window = self._open_memmap(shard_idx)[start : start + self.sequence_length + 1]
         tokens = torch.from_numpy(window.astype(np.int64))
-        return {"input_ids": tokens[:-1], "labels": tokens[1:]}
+        item = {"input_ids": tokens[:-1], "labels": tokens[1:]}
+        doc_dir = self.directory / f"{self.split}_docs"
+        doc_file = doc_dir / self._shards[shard_idx].filename
+        if doc_file.is_file():
+            if not hasattr(self, "_docmaps"):
+                self._docmaps = {}
+            if shard_idx not in self._docmaps:
+                self._docmaps[shard_idx] = np.memmap(doc_file, dtype=np.uint32, mode="r")
+            owners = self._docmaps[shard_idx][start : start + self.sequence_length]
+            item["document_ids"] = torch.from_numpy(owners.astype(np.int64))
+        return item
 
 
 def build_dataloader(

@@ -14,6 +14,7 @@ Adding distributed training (DDP/FSDP/...) means passing a different
 ``TrainingStrategy`` — the loop below does not change.
 """
 
+import time
 from collections.abc import Iterator
 from dataclasses import asdict
 from pathlib import Path
@@ -67,14 +68,17 @@ class Trainer:
 
         self.device = resolve_device(self.train_config.device)
         self.precision = resolve_precision(self.train_config.precision, self.device)
+        self._micro_batch = self._resolve_micro_batch()
         if self.train_config.gradient_checkpointing:
             self.model.enable_gradient_checkpointing()
 
         self.model.to(self.device)
         self.model = self.strategy.wrap_model(self.model)
+        self.model = _apply_parameter_sharding(self.model, self.train_config.sharding)
         self.raw_model: FontaineModel = unwrap_model(self.model)  # type: ignore[assignment]
 
-        self.optimizer = self.strategy.wrap_optimizer(build_optimizer(self.raw_model, self.train_config))
+        optimizer = _build_sharded_optimizer(self.raw_model, self.train_config)
+        self.optimizer = self.strategy.wrap_optimizer(optimizer)
         self.scheduler = WarmupScheduler(
             self.optimizer,
             total_steps=self.train_config.max_steps,
@@ -123,8 +127,6 @@ class Trainer:
 
         self.model.train()
         batches: Iterator[dict[str, torch.Tensor]] = self._cycle(self.train_loader)
-        effective_batch = self.train_config.batch_size * self.train_config.gradient_accumulation_steps
-        tokens_per_step = effective_batch * self.config.data.sequence_length
 
         final_metrics: dict[str, float] = {}
         for step in range(start_step + 1, self.train_config.max_steps + 1):
@@ -132,11 +134,7 @@ class Trainer:
             self.scheduler.step()
 
             if step % self.train_config.log_interval == 0:
-                metrics = {
-                    "train_loss": round(step_loss, 6),
-                    "learning_rate": self.scheduler.get_last_lr()[0],
-                    "tokens_per_step": tokens_per_step,
-                }
+                metrics = self._step_metrics(step_loss)
                 if self.strategy.context.is_primary:
                     logger.info(
                         "step %d/%d loss=%.4f lr=%.2e",
@@ -165,6 +163,7 @@ class Trainer:
             metric=self._as_checkpoint_metric(final_metrics),
             final=True,
         )
+        self.checkpoints.wait()
         if self.strategy.context.is_primary:
             self.run.finalize(final_metrics)
         self.strategy.wait_for_everyone()
@@ -184,28 +183,52 @@ class Trainer:
         total_loss = 0.0
         accum = self.train_config.gradient_accumulation_steps
         autocast_dtype = self.precision.autocast_dtype
+        started = time.perf_counter()
 
         for _ in range(accum):
             batch = next(batches)
             input_ids = batch["input_ids"].to(self.device, non_blocking=True)
             labels = batch["labels"].to(self.device, non_blocking=True)
+            if self.train_config.stage == "supervised_fine_tuning":
+                from fontaine.training.stages import mask_prompt_labels
+
+                labels = mask_prompt_labels(input_ids, labels, self.tokenizer)
+                if int((labels != -100).sum()) == 0:
+                    raise RuntimeError(
+                        "supervised_fine_tuning masked every token in this batch. "
+                        "The response marker '### Response:\\n' was not found. "
+                        "Prepare instruction text in that format, or use stage=pretraining."
+                    )
+            document_ids = batch.get("document_ids")
+            if document_ids is not None:
+                document_ids = document_ids.to(self.device, non_blocking=True)
+            if input_ids.shape[0] > self._micro_batch:
+                input_ids = input_ids[: self._micro_batch]
+                labels = labels[: self._micro_batch]
+                if document_ids is not None:
+                    document_ids = document_ids[: self._micro_batch]
             with torch.autocast(
                 device_type=self.device.type, dtype=autocast_dtype, enabled=autocast_dtype is not None
             ):
-                output = self.model(input_ids, targets=labels)
+                output = self.model(input_ids, targets=labels, document_ids=document_ids)
                 loss = output.loss / accum
-            if self.scaler is not None:
-                self.scaler.scale(loss).backward()
-            else:
-                loss.backward()
-            total_loss += output.loss.item()
+            if loss.requires_grad:
+                if self.scaler is not None:
+                    self.scaler.scale(loss).backward()
+                else:
+                    loss.backward()
+            total_loss += float(output.loss.detach())
 
+        if self.strategy.name == "single_device":
+            from fontaine.distributed.groups import sync_data_parallel_gradients
+
+            sync_data_parallel_gradients(self.raw_model)
         if self.scaler is not None:
             self.scaler.unscale_(self.optimizer)
-        if self.train_config.max_grad_norm > 0:
-            torch.nn.utils.clip_grad_norm_(
-                self.raw_model.parameters(), self.train_config.max_grad_norm
-            )
+        clip = self.train_config.max_grad_norm if self.train_config.max_grad_norm > 0 else float("inf")
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.raw_model.parameters(), clip)
+        self._grad_norm = float(grad_norm)
+        self._step_seconds = time.perf_counter() - started
         if self.scaler is not None:
             self.scaler.step(self.optimizer)
             self.scaler.update()
@@ -252,9 +275,23 @@ class Trainer:
         metric: dict[str, Any] | None = None,
         final: bool = False,
     ) -> None:
-        """Persist full state (primary rank only in distributed runs)."""
-        if not self.strategy.context.is_primary:
+        """Persist full state. Sharded meshes save one file per rank."""
+        distributed = self.config.distributed
+        sharded = distributed.world_size > 1 and (
+            distributed.tensor_parallel_size > 1
+            or distributed.pipeline_parallel_size > 1
+            or distributed.expert_parallel_size > 1
+        )
+        if not sharded and not self.strategy.context.is_primary:
             return
+        rank = 0
+        world_size = 1
+        if sharded:
+            import torch.distributed as dist
+
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+        started = time.perf_counter()
         dataset_meta: dict[str, Any] = {"manifest_path": self.config.data.manifest_path}
         if self.config.data.manifest_path:
             from fontaine.data.manifest import DatasetManifest
@@ -286,10 +323,116 @@ class Trainer:
             dataset=dataset_meta,
             code={"fontaine_version": __version__},
             metric=metric if not final else self._force_best_metric(metric),
+            rank=rank,
+            world_size=world_size,
+            async_write=self.train_config.async_checkpoints,
         )
+        if self.strategy.context.is_primary:
+            self.run.log_metrics(
+                {"checkpoint_seconds": round(time.perf_counter() - started, 6)}, step
+            )
+
+    def _resolve_micro_batch(self) -> int:
+        requested = self.train_config.batch_size
+        if not self.train_config.fit_batch_to_memory:
+            return requested
+        from fontaine.optimization.hardware import detect_hardware
+        from fontaine.optimization.memory import suggest_micro_batch
+
+        if self.device.type == "cuda":
+            budget = int(torch.cuda.get_device_properties(self.device).total_memory)
+        else:
+            budget = detect_hardware().available_ram_bytes
+        chosen = suggest_micro_batch(
+            self.config.model,
+            self.config.data.sequence_length,
+            requested,
+            budget,
+            optimizer=self.train_config.optimizer,
+            gradient_checkpointing=self.train_config.gradient_checkpointing,
+        )
+        if chosen != requested:
+            logger.info(
+                "fit_batch_to_memory set the micro-batch to %d (configured batch_size=%d)",
+                chosen,
+                requested,
+            )
+        return chosen
+
+    def _step_metrics(self, step_loss: float) -> dict[str, float]:
+        elapsed = float(getattr(self, "_step_seconds", 0.0))
+        tokens = (
+            self._micro_batch
+            * self.train_config.gradient_accumulation_steps
+            * self.config.data.sequence_length
+        )
+        metrics: dict[str, float] = {
+            "train_loss": round(step_loss, 6),
+            "learning_rate": float(self.scheduler.get_last_lr()[0]),
+            "tokens_per_step": float(tokens),
+            "grad_norm": round(float(getattr(self, "_grad_norm", 0.0)), 6),
+            "step_seconds": round(elapsed, 6),
+        }
+        if elapsed > 0:
+            samples = self._micro_batch * self.train_config.gradient_accumulation_steps
+            metrics["tokens_per_second"] = round(tokens / elapsed, 3)
+            metrics["samples_per_second"] = round(samples / elapsed, 3)
+        if self.device.type == "cuda" and torch.cuda.is_available():
+            metrics["gpu_memory_bytes"] = float(torch.cuda.memory_allocated(self.device))
+            if hasattr(torch.cuda, "utilization"):
+                try:
+                    metrics["gpu_utilization"] = float(torch.cuda.utilization(self.device))
+                except RuntimeError:
+                    pass
+        routing = self.raw_model.routing_stats()
+        if routing:
+            metrics["expert_utilization"] = round(
+                sum(item["expert_utilization"] for item in routing) / len(routing), 6
+            )
+            metrics["routing_entropy"] = round(
+                sum(item["routing_entropy"] for item in routing) / len(routing), 6
+            )
+        return metrics
 
     def _force_best_metric(self, metric: dict[str, Any] | None) -> dict[str, Any] | None:
         """Mark the final checkpoint as best so it survives pruning."""
         if metric is not None and self._best_metric is not None and metric["value"] <= self._best_metric:
             self._best_metric = metric["value"]
         return metric
+
+
+def _apply_parameter_sharding(model: torch.nn.Module, sharding: str) -> torch.nn.Module:
+    if sharding != "fsdp":
+        return model
+    import torch.distributed as dist
+    from torch.distributed.fsdp import FullyShardedDataParallel
+
+    if not (dist.is_available() and dist.is_initialized()):
+        raise RuntimeError(
+            "training.sharding=fsdp shards parameters, gradients, and optimizer state, "
+            "but torch.distributed is not initialized. Launch with torchrun. "
+            "Training was not started."
+        )
+    return FullyShardedDataParallel(model)
+
+
+def _build_sharded_optimizer(model: torch.nn.Module, config):
+    if config.sharding != "optimizer":
+        return build_optimizer(model, config)
+    import torch.distributed as dist
+    from torch.distributed.optim import ZeroRedundancyOptimizer
+
+    if not (dist.is_available() and dist.is_initialized()):
+        raise RuntimeError(
+            "training.sharding=optimizer shards AdamW state across ranks, "
+            "but torch.distributed is not initialized. Launch with torchrun. "
+            "Training was not started."
+        )
+    return ZeroRedundancyOptimizer(
+        model.parameters(),
+        optimizer_class=torch.optim.AdamW,
+        lr=config.learning_rate,
+        betas=(config.adam_beta1, config.adam_beta2),
+        eps=config.adam_eps,
+        weight_decay=config.weight_decay,
+    )

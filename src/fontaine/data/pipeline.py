@@ -75,20 +75,44 @@ def prepare_dataset(
     )
 
     buffers: dict[str, list[int]] = {"train": [], "val": []}
+    owner_buffers: dict[str, list[int]] = {"train": [], "val": []}
+    doc_writers = {}
+    if config.pack_documents:
+        doc_writers = {
+            "train": TokenShardWriter(
+                output_dir / "train_docs", "train", config.shard_size_tokens, 2**31, "uint32"
+            )
+        }
+        if val_writer is not None:
+            doc_writers["val"] = TokenShardWriter(
+                output_dir / "val_docs", "val", config.shard_size_tokens, 2**31, "uint32"
+            )
 
-    def push(split: str, ids: list[int]) -> None:
+    def push(split: str, ids: list[int], owners: list[int] | None = None) -> None:
         buffer = buffers[split]
         buffer.extend(ids)
+        if owners is not None:
+            owner_buffers[split].extend(owners)
         writer = train_writer if split == "train" else val_writer
         while len(buffer) >= window:
             writer.add_tokens(buffer[:window])  # type: ignore[union-attr]
             del buffer[:window]
+            if split in doc_writers:
+                doc_writers[split].add_tokens(owner_buffers[split][:window])
+                del owner_buffers[split][:window]
 
     rng = random.Random(config.seed)
     cleaner = DocumentCleaner(config)
     split_rng_threshold = config.val_fraction
+    if config.mixture:
+        from fontaine.data.mixture import iter_mixture
 
-    for document in cleaner.clean(iter_source_documents(config.raw_paths)):
+        documents = iter_mixture(config.mixture, config.seed)
+    else:
+        documents = iter_source_documents(config.raw_paths)
+    doc_index = 0
+
+    for document in cleaner.clean(documents):
         split = (
             "val"
             if val_writer is not None and rng.random() < split_rng_threshold
@@ -96,9 +120,14 @@ def prepare_dataset(
         )
         ids = tokenizer.encode(document)
         ids.append(tokenizer.eos_id)  # EOS separates documents in the token stream
-        push(split, ids)
+        owners = [doc_index] * len(ids) if config.pack_documents else None
+        push(split, ids, owners)
+        doc_index += 1
 
     tokens_dropped = len(buffers["train"]) + len(buffers["val"])
+    if doc_writers:
+        for writer in doc_writers.values():
+            writer.finalize()
     train_shards = train_writer.finalize()
     val_shards = val_writer.finalize() if val_writer is not None else []
 

@@ -1,5 +1,6 @@
 """Fontaine evaluation subsystem."""
 
+from fontaine.evaluation import tasks as _tasks  # noqa: F401  (registers evaluators)
 from fontaine.evaluation.base import (
     EvalContext,
     Evaluator,

@@ -41,6 +41,7 @@ dev = [
 
 [project.scripts]
 fontaine = "fontaine.cli.main:main"
+yami = "fontaine.cli.main:main"
 
 [project.urls]
 Documentation = "docs/index.md"

@@ -20,6 +20,7 @@ without rewriting the codebase.
 | [evaluation/framework.md](evaluation/framework.md) | Evaluator registry, adding benchmarks |
 | [inference/architecture.md](inference/architecture.md) | Generation engine, KV cache, sampling |
 | [scaling/roadmap.md](scaling/roadmap.md) | Tiny → XL → distributed scaling plan |
+| [scaling/yami-super.md](scaling/yami-super.md) | Frontier-scale profiles, parallelism, and what was actually tested |
 | [deployment/serving.md](deployment/serving.md) | From dev server to production inference |
 | [deployment/model-registry.md](deployment/model-registry.md) | Model registry design |
 | [research/post-training.md](research/post-training.md) | SFT, preference optimization, RL extension points |

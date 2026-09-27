@@ -52,6 +52,23 @@ python -m fontaine train --model-config configs/model/tiny.yaml \
 --set training.early_stopping_patience=5 --set inference.seed=null
 ```
 
+## Profiles
+
+`configs/yami_super.yaml` is one file with a `profiles:` map. The selected
+profile overlays the base sections. Pick it with `profile:` in the file or
+`--profile` on the command line. `extends:` loads another YAML first.
+`YAMI_SET` or `FONTAINE_SET` (space-separated `key=value`) applies before
+`--set`. Nested `model.attention`, `model.router`, `optimizer`, and
+`scheduler` blocks are folded into the flat schema. Setting the same value
+in both places is an error.
+
+```bash
+python -m fontaine.cli.main model estimate-params --config configs/yami_super.yaml --profile 7b
+```
+
+Profile parameter counts and which of them were executed are in
+[scaling/yami-super.md](../scaling/yami-super.md).
+
 ## Adding a new subsystem
 
 Add a dataclass + a section key in `config/loader.py` (`_SECTION_TYPES`) and

@@ -32,7 +32,7 @@ def build_optimizer(model: torch.nn.Module, config: TrainingConfig) -> torch.opt
         groups,
         lr=config.learning_rate,
         betas=(config.adam_beta1, config.adam_beta2),
-        eps=1e-8,
+        eps=config.adam_eps,
     )
 
 
@@ -50,8 +50,10 @@ class WarmupScheduler:
         min_ratio: float = 0.1,
         schedule: str = "cosine",
     ) -> None:
-        if schedule not in ("cosine", "constant"):
-            raise ValueError(f"unknown schedule {schedule!r}")
+        if schedule not in ("cosine", "linear", "constant"):
+            raise ValueError(
+                f"unknown schedule {schedule!r}. Choose cosine, linear, or constant."
+            )
         self.optimizer = optimizer
         self.total_steps = max(total_steps, 1)
         self.warmup_steps = warmup_steps
@@ -70,6 +72,8 @@ class WarmupScheduler:
             self.total_steps - self.warmup_steps, 1
         )
         progress = min(progress, 1.0)
+        if self.schedule == "linear":
+            return base_lr * (self.min_ratio + (1.0 - self.min_ratio) * (1.0 - progress))
         cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
         return base_lr * (self.min_ratio + (1.0 - self.min_ratio) * cosine)
 

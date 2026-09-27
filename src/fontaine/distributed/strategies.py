@@ -1,16 +1,10 @@
-"""Distributed-training seams for future scale-up.
+"""Distributed-training strategies.
 
-The first Fontaine release is single-process: the trainer accepts a
-``TrainingStrategy`` and a ``ParallelContext`` that are trivial no-ops today.
-The interfaces are the migration path — when Fontaine grows to multi-GPU
-(DDP), multi-node FSDP, or tensor/pipeline parallelism, the *trainer loop*
-stays untouched; only the strategy implementation changes.
-
-Framework notes (see ``docs/scaling/roadmap.md``):
-- DDP: torch.distributed + DistributedSampler (skeleton provided).
-- FSDP / DeepSpeed ZeRO: shard parameters/optimizer/activations across ranks.
-- Megatron-style TP/PP: requires model sharding inside the Transformer —
-  the config-driven model is structured for it but not implemented.
+``TrainingStrategy`` is the single-process default. Data, tensor, pipeline,
+and expert parallel are applied from ``distributed`` in the config: the
+trainer builds the mesh, and ``DistributedDataParallelStrategy`` remains the
+explicit wrapper for a replicated data-parallel job. FSDP and optimizer
+sharding are selected with ``training.sharding``.
 """
 
 from dataclasses import dataclass

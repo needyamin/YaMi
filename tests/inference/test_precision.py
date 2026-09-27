@@ -43,8 +43,9 @@ def test_int8_is_rejected_off_cpu():
 
 def test_inference_config_validates_precision_and_threads():
     InferenceConfig(precision="int8", num_threads=2).validate()
+    InferenceConfig(precision="int4").validate()
     with pytest.raises(ConfigError, match="precision"):
-        InferenceConfig(precision="int4").validate()
+        InferenceConfig(precision="int2").validate()
     with pytest.raises(ConfigError, match="num_threads"):
         InferenceConfig(num_threads=-1).validate()
 
