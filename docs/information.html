@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Fontaine AI — Project guide</title>
+<link rel="icon" href="assets/yami-v1.0.png" type="image/png">
 <style>
   :root {
     --ink: #2d2a26;
@@ -35,6 +36,7 @@
     padding: 40px 34px;
     margin-bottom: 36px;
   }
+  header.hero .logo { width: 72px; height: 72px; border-radius: 16px; margin-bottom: 16px; }
   header.hero h1 { margin: 0 0 10px; font-size: 2em; font-weight: normal; }
   header.hero p { margin: 0; opacity: .92; font-size: 1.08em; }
   h2 {
@@ -110,6 +112,7 @@
 <div class="wrap">
 
 <header class="hero">
+  <img class="logo" src="assets/yami-v1.0.png" alt="Yami v1.0">
   <h1>Fontaine AI</h1>
   <p>A small foundation-model project: prepare a code corpus, train a decoder-only
      Transformer, and chat with the checkpoint in the browser. Commands below
@@ -121,7 +124,8 @@
 <h2>What it is</h2>
 
 <p>Fontaine is a config-driven decoder-only language model (RoPE, grouped-query
-attention, SwiGLU, RMSNorm). Sizes are YAML files, not separate codebases.
+attention, SwiGLU, RMSNorm, optional QK-norm and sliding-window attention, and
+mixture-of-experts). Sizes are YAML files, not separate codebases.
 The reference corpus is CodeAlpaca-20k, rendered in the Alpaca template
 (<code>### Instruction:</code> / <code>### Response:</code>). Chat uses that
 same template, so you type a normal question and the server wraps it.</p>
@@ -137,9 +141,9 @@ same template, so you type a normal question and the server wraps it.</p>
 <h2>Model sizes</h2>
 
 <p>Counts below are what <code>fontaine model inspect</code> prints. Dense rows
-assume an 8k vocabulary. Coding rows use the vocabulary written in each file.
-Training memory follows <b>total</b> parameters, because every expert is stored.
-Inference cost follows <b>active</b> parameters.</p>
+assume an 8k vocabulary. Coding and Yami rows use the vocabulary written in each
+file (Yami: 32k). Training memory follows <b>total</b> parameters, because every
+expert is stored. Inference cost follows <b>active</b> parameters.</p>
 
 <table>
   <tr><th>Config</th><th>Parameters</th><th>Context</th><th>Hardware</th></tr>
@@ -149,13 +153,24 @@ Inference cost follows <b>active</b> parameters.</p>
   <tr><td><code>configs/model/coding_low.yaml</code></td><td>5.7M active / 22M total</td><td>512</td><td>Laptop CPU. 8 experts, top-1.</td></tr>
   <tr><td><code>configs/model/coding_mid.yaml</code></td><td>39M active / 114M total</td><td>1024</td><td>Desktop CPU or a free GPU. 8 experts, top-2.</td></tr>
   <tr><td><code>configs/model/coding_high.yaml</code></td><td>129M active / 384M total</td><td>2048</td><td>GPU to train, workstation CPU to run. 8 experts, top-2. Turn on gradient checkpointing.</td></tr>
+  <tr><td><code>configs/model/yami_nano.yaml</code></td><td>25M dense</td><td>2048</td><td>Any 4-core CPU, 4–8 GB RAM. 72 MiB of int8 weights.</td></tr>
+  <tr><td><code>configs/model/yami_small.yaml</code></td><td>115M dense</td><td>4096</td><td>Laptop CPU, 8–16 GB RAM. 206 MiB int8.</td></tr>
+  <tr><td><code>configs/model/yami_base.yaml</code></td><td>323M dense</td><td>4096</td><td>8+ core desktop, 16–32 GB RAM. 436 MiB int8. Sliding-window attention.</td></tr>
+  <tr><td><code>configs/model/yami_large.yaml</code></td><td>1.06B dense</td><td>8192</td><td>12+ core workstation, 32 GB+ RAM. 1.24 GiB int8. Sliding-window attention. A GPU to train.</td></tr>
 </table>
 
-<pre><code>python -m fontaine.cli.main model inspect --model-config configs/model/coding_low.yaml</code></pre>
+<p>The Yami rows add QK-norm (each attention head normalizes its queries and
+keys, which keeps training stable) and, on Base and Large, sliding-window
+attention: three of every four layers look only at the last 1,024 tokens, so
+long prompts cost less. None of the Yami configs is trained yet.</p>
 
-<p>When you train a coding config, set <code>data.sequence_length</code> equal to
-that model’s <code>max_sequence_length</code> (512, 1024, or 2048). A longer
-data window is rejected.</p>
+<pre><code>python -m fontaine.cli.main model inspect --model-config configs/model/yami_small.yaml
+python -m fontaine.cli.main model recommend</code></pre>
+
+<p><code>model recommend</code> reads your CPU cores and RAM and names the
+largest Yami tier that fits. When you train any config, set
+<code>data.sequence_length</code> to at most that model’s
+<code>max_sequence_length</code>. A longer data window is rejected.</p>
 
 <h2>Folders</h2>
 
@@ -174,10 +189,33 @@ data window is rejected.</p>
 Do not drop datasets into <code>experiments/</code>. Do not edit
 <code>datasets/prepared</code> by hand. <code>data prepare</code> overwrites
 that folder, and tokenizer training reads everything currently in
-<code>datasets/raw</code>. Accepted inputs are <code>.txt</code>,
-<code>.jsonl</code>, <code>.json</code>, and <code>.csv</code>.</div>
+<code>datasets/raw</code>. Accepted inputs are listed under Data below.</div>
 
 <h2>Data</h2>
+
+<p>Put any mix of these in <code>datasets/raw</code>. Everything is read as a
+stream; archives are never extracted to disk.</p>
+
+<table>
+  <tr><th>Kind</th><th>Files</th><th>One document is</th></tr>
+  <tr><td>Plain text</td><td><code>.txt</code></td><td>a paragraph</td></tr>
+  <tr><td>Prose and markup</td><td><code>.md</code>, <code>.rst</code>, <code>.html</code>, <code>.tex</code></td><td>the whole file</td></tr>
+  <tr><td>Source code</td><td><code>.py</code>, <code>.js</code>, <code>.ts</code>, <code>.java</code>, <code>.cpp</code>, <code>.go</code>, <code>.rs</code>, <code>.sql</code>, <code>Dockerfile</code>, and more</td><td>the whole file</td></tr>
+  <tr><td>Records</td><td><code>.jsonl</code>, <code>.json</code>, <code>.csv</code>, <code>.tsv</code>, <code>.parquet</code></td><td>one record</td></tr>
+  <tr><td>Notebooks</td><td><code>.ipynb</code></td><td>markdown and code cells</td></tr>
+  <tr><td>Archives</td><td><code>.zip</code>, <code>.tar</code>, <code>.tar.gz</code>, <code>.tar.xz</code> (nested too)</td><td>each file inside, by its own type</td></tr>
+  <tr><td>Compressed files</td><td><code>.gz</code>, <code>.bz2</code>, <code>.xz</code>, <code>.zst</code></td><td>the file inside</td></tr>
+</table>
+
+<p>A record can hold plain <code>text</code>, a chat (<code>messages</code> with
+<code>role</code>/<code>content</code>, or ShareGPT <code>conversations</code>),
+or an instruction pair (<code>instruction</code>, optional <code>input</code>,
+<code>output</code>; also <code>prompt</code>/<code>response</code> and
+<code>question</code>/<code>answer</code>). Chat and instruction records are
+written in the same <code>### Instruction:</code> / <code>### Response:</code>
+layout the chat server uses. Images and other binary files are skipped with a
+warning. Use the <code>hf_bpe</code> tokenizer for mixed data: it encodes any
+language or symbol. Details: <code>docs/data/pipeline.md</code>.</p>
 
 <p>CodeAlpaca-20k is the reference corpus: about 20,000 instruction and answer
 pairs. Download it, then rewrite each record into one <code>text</code> line.</p>
@@ -207,10 +245,17 @@ python -m fontaine.cli.main data prepare \
   --set 'data.raw_paths=["datasets/raw"]' \
   --license "Apache-2.0"</code></pre>
 
-<p>Preparation writes <code>datasets/prepared/manifest.json</code>. A finished
+<p>Preparation writes <code>datasets/prepared/manifest.json</code>. An earlier
 CodeAlpaca tiny run on CPU (5,000 steps) reached val loss 2.14 and perplexity
 8.5. That is the expected quality of the tiny model: short, style-matched
-code, not a general assistant.</p>
+code, not a general assistant. That run is no longer in this folder.</p>
+
+<div class="box-warning"><strong>Current state.</strong> The only run in
+<code>experiments/</code> is <code>2026-09-24_083835_quickstart</code>: a 3.2M
+model trained for 200 steps on a toy word list with a 99-token vocabulary. It
+is what the chat serves today, and it usually returns an empty reply or
+random words. Chat then shows a short status message explaining that the model
+stopped before writing. Train a real corpus to get real answers.</div>
 
 <h2>Train</h2>
 
@@ -252,7 +297,7 @@ fewer steps.</p>
 <code>FONTAINE_CHECKPOINT</code> to the container path of a run’s
 <code>checkpoints</code> folder. A missing folder makes the API fail at
 startup. Ports: the API is <code>8321</code> on the host
-(<code>FONTAINE_PORT</code>), and the chat page is <code>3000</code>
+(<code>FONTAINE_PORT</code>), and Open WebUI is <code>3000</code>
 (<code>WEBUI_PORT</code>).</p>
 
 <pre><code>cp .env.example .env
@@ -260,10 +305,19 @@ docker compose up -d web webui</code></pre>
 
 <p>Open <a href="http://localhost:3000">http://localhost:3000</a>. Open WebUI
 talks to the Fontaine API over the Ollama protocol (<code>/api/chat</code>,
-<code>/api/tags</code>, <code>/api/ps</code>). The model picker shows
-<b>Yami v1.0</b>. You do not type the Alpaca wrapper. Sampling defaults
+<code>/api/tags</code>, <code>/api/show</code>). The model picker shows
+<b>Yami v1.0</b>, and the context control uses the checkpoint maximum.
+You do not type the Alpaca wrapper. Sampling defaults
 for code are temperature 0.2, top-p 0.9, and a light repetition penalty.
-The API also stops a chat reply before a fake next <code>### Instruction:</code>.</p>
+The API also stops a chat reply before a fake next <code>### Instruction:</code>.
+If the model writes nothing or fails, the reply says so instead of staying blank.</p>
+
+<p>On a CPU, models of 20M parameters or more load as int8 weights by default
+(<code>inference.precision: auto</code>), which cuts weight memory by about 3x.
+Override with <code>--precision fp32|bf16|int8</code> and set CPU threads with
+<code>--threads N</code> on <code>serve</code> and <code>generate</code>.
+<code>/api/show</code> reports the format as <code>F32</code>, <code>BF16</code>,
+or <code>Q8_0</code>.</p>
 
 <p>After a new training run, edit <code>.env</code> and recreate the containers.
 No image rebuild is required unless the Python source changed.</p>
@@ -293,6 +347,9 @@ API, and Open WebUI auth is off for local development. Do not publish ports
   <tr><td>Stop</td><td><code>docker compose down</code></td></tr>
   <tr><td>Rebuild after source changes</td><td><code>docker compose up -d --build web webui</code></td></tr>
   <tr><td>Inspect a size</td><td><code>python -m fontaine.cli.main model inspect --model-config configs/model/tiny.yaml</code></td></tr>
+  <tr><td>Pick a size for this machine</td><td><code>python -m fontaine.cli.main model recommend</code></td></tr>
+  <tr><td>Check raw data</td><td><code>python -m fontaine.cli.main data validate --data-config configs/data/default.yaml --set 'data.raw_paths=["datasets/raw"]'</code></td></tr>
+  <tr><td>Run tests</td><td><code>python -m pytest</code> (172 CPU tests)</td></tr>
 </table>
 
 <div class="box-good"><strong>Keep together.</strong> A checkpoint only speaks

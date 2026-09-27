@@ -11,5 +11,7 @@ inference:
   stop_sequences: []
   seed: null
   model_name: "Yami v1.0"   # label in the chat model picker
+  precision: auto           # auto | fp32 | bf16 | int8 (auto: int8 on CPU for 20M+ params)
+  num_threads: 0            # CPU threads; 0 = PyTorch default (physical cores)
   server_host: 127.0.0.1
   server_port: 8321

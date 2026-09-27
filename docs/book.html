@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fontaine AI — The Book: How an AI Model Is Designed, Trained, and Scaled</title>
+<link rel="icon" href="assets/yami-v1.0.png" type="image/png">
 <meta name="description" content="A beginner-friendly educational book that explains, from zero, how the Fontaine AI language model is designed, trained, evaluated, and scaled.">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
@@ -313,7 +314,7 @@ p code, li code, td code { background: var(--fx-code-bg); border: 1px solid var(
   <button id="tocToggleBtn" class="btn btn-sm btn-outline-secondary d-lg-none me-2" type="button" data-bs-toggle="offcanvas" data-bs-target="#fx-sidebar" aria-controls="fx-sidebar">
     <i class="bi bi-list"></i><span class="d-none d-sm-inline ms-1">Contents</span>
   </button>
-  <a class="navbar-brand fx-brand me-2" href="#top"><span class="fx-drop">&#9679;</span> Fontaine AI<span class="d-none d-sm-inline"> — The Book</span></a>
+  <a class="navbar-brand fx-brand me-2" href="#top"><img src="assets/yami-v1.0.png" alt="" width="28" height="28" style="border-radius:6px;vertical-align:middle;margin-right:.4rem"> Fontaine AI<span class="d-none d-sm-inline"> — The Book</span></a>
   <span class="fx-current-chapter d-none d-xl-inline" id="fx-current"></span>
   <div class="ms-auto d-flex align-items-center gap-2 position-relative">
     <div class="position-relative" style="width: clamp(110px, 42vw, 320px);">
@@ -917,7 +918,10 @@ p code, li code, td code { background: var(--fx-code-bg); border: 1px solid var(
     </tbody>
   </table></div>
   <p>For the first Fontaine model, any honest mix of the first rows works. Fontaine's pipeline accepts plain
-  text, JSONL (one document per line), CSV, and JSON files — whatever you legally own or may use.</p>
+  text, Markdown, source code, JSONL, JSON, CSV/TSV, Parquet, and notebooks, plus <code>.zip</code> and
+  <code>.tar</code> archives of them (compressed or nested), all read as a stream. Chat records
+  (<code>messages</code>) and instruction records (<code>instruction</code>/<code>output</code>) are
+  rendered in the same layout the chat server uses. Use whatever you legally own or may use.</p>
 
   <h3>Quantity vs. quality — the quiet hierarchy</h3>
   <p>Both matter, but not equally, and not in the way headlines imply:</p>
@@ -1863,6 +1867,25 @@ p code, li code, td code { background: var(--fx-code-bg); border: 1px solid var(
   <p>The lesson hiding in this table: <strong>Fontaine Tiny, Small, and Medium are the same program with
   different configuration files.</strong> Nothing in the source code knows how big the model is. That is the
   &ldquo;model-size independence&rdquo; principle — and it is why the architecture can honestly scale later.</p>
+
+  <h3>The Yami CPU ladder</h3>
+  <p>The same program also carries four larger dense configs built to <em>run</em> on ordinary CPUs, counted at a
+  32k vocabulary. They add two techniques from current open models: <span class="term">QK-norm</span> (queries and
+  keys are normalized per head, which keeps attention stable) and, on Base and Large,
+  <span class="term">sliding-window attention</span> (three of every four layers look only at the last 1,024
+  tokens, which makes long prompts cheaper). On a CPU the server loads their weights as 8-bit integers.</p>
+  <div class="fx-table"><table class="table mb-0 align-middle">
+    <thead><tr><th>Config</th><th>Parameters</th><th>hidden &times; layers</th><th>Context</th><th>int8 weights</th><th>Runs on</th></tr></thead>
+    <tbody>
+      <tr><td><code>yami_nano</code></td><td>25 M</td><td>384 &times; 8</td><td>2,048</td><td>72 MiB</td><td>any 4-core CPU, 4–8 GB RAM</td></tr>
+      <tr><td><code>yami_small</code></td><td>115 M</td><td>768 &times; 12</td><td>4,096</td><td>206 MiB</td><td>laptop CPU, 8–16 GB RAM</td></tr>
+      <tr><td><code>yami_base</code></td><td>323 M</td><td>1024 &times; 24</td><td>4,096</td><td>436 MiB</td><td>8+ core desktop, 16–32 GB RAM</td></tr>
+      <tr><td><code>yami_large</code></td><td>1.06 B</td><td>2048 &times; 22</td><td>8,192</td><td>1.24 GiB</td><td>12+ core workstation, 32 GB+ RAM</td></tr>
+    </tbody>
+  </table></div>
+  <p><code>fontaine model recommend</code> reads your core count and RAM and names the largest tier that fits.
+  These are shapes waiting for data: none of them has been trained yet, and how well one answers depends
+  entirely on the corpus and compute you give it (Ch 30).</p>
 
   <div class="callout co-ana"><div class="callout-title"><i class="bi bi-puzzle"></i>Analogy — the fountain itself</div>
     <p>Text pours in at the top as tokens, spreads into embeddings, is reshaped by every tier of the block
@@ -2915,7 +2938,8 @@ p code, li code, td code { background: var(--fx-code-bg); border: 1px solid var(
   <p>Chapter 17's rule — 16 bytes per parameter before activations — scales linearly but arrives brutally:
   1 B parameters &asymp; 16 GB <em>just for training state</em>, before the first activation. Activations add
   more, growing with batch &times; context &times; layers. Inference escapes some of this (no gradients or optimizer
-  states — roughly 2 bytes/param when quantized) which is why a 16 GB machine can <em>serve</em> a 1–2 B model
+  states — 1 byte/param in int8, 2 in 16-bit; Yami Large's 1.06 B parameters load as about 1.3 GB of int8
+  weights) which is why a 16 GB machine can <em>serve</em> a 1–2 B model
   yet never <em>train</em> one. Memory is the first wall every scaler hits.</p>
 
   <h3>Wall 2 — Compute: the years-and-electricity problem</h3>
@@ -3150,7 +3174,7 @@ p code, li code, td code { background: var(--fx-code-bg); border: 1px solid var(
 │   ├── checkpointing/    save-game system (Ch 22)
 │   ├── distributed/      the scaling seams (Ch 32–33)
 │   ├── config/           typed configuration loading (Ch 36)
-│   ├── optimization/     memory + precision planning (Ch 17)
+│   ├── optimization/     memory planning, int8 inference, hardware tiers (Ch 17)
 │   └── utils/            small shared tools
 ├── tests/            ← proof the platform works (unit → integration)
 ├── docs/             ← explanations — including this book
@@ -3205,10 +3229,10 @@ p code, li code, td code { background: var(--fx-code-bg); border: 1px solid var(
   <div class="fx-table"><table class="table mb-0 align-middle">
     <thead><tr><th style="width:22%">Family</th><th>What it controls</th><th style="width:38%">Examples of keys</th></tr></thead>
     <tbody>
-      <tr><td><b>Model</b></td><td>the architecture itself (Ch 15's table)</td><td><code>hidden_size</code>, <code>num_layers</code>, <code>num_attention_heads</code>, <code>num_kv_heads</code>, <code>max_sequence_length</code>, <code>vocab_size: auto</code></td></tr>
+      <tr><td><b>Model</b></td><td>the architecture itself (Ch 15's table)</td><td><code>hidden_size</code>, <code>num_layers</code>, <code>num_attention_heads</code>, <code>num_kv_heads</code>, <code>max_sequence_length</code>, <code>vocab_size: auto</code>, <code>qk_norm</code>, <code>sliding_window</code></td></tr>
       <tr><td><b>Training</b></td><td>the loop of Ch 21 and the memory plan of Ch 17</td><td><code>batch_size</code>, <code>gradient_accumulation_steps</code>, <code>learning_rate</code>, <code>warmup_steps</code>, <code>precision</code>, <code>checkpoint_interval</code>, <code>seed</code></td></tr>
       <tr><td><b>Data</b></td><td>the pipeline of Parts II–III</td><td><code>raw_paths</code>, <code>val_fraction</code>, cleaning limits, <code>sequence_length</code>, <code>shard_size_tokens</code></td></tr>
-      <tr><td><b>Inference</b></td><td>generation and serving (Ch 26)</td><td><code>temperature</code>, <code>top_k</code>, <code>top_p</code>, <code>max_new_tokens</code>, <code>stop_sequences</code></td></tr>
+      <tr><td><b>Inference</b></td><td>generation and serving (Ch 26)</td><td><code>temperature</code>, <code>top_k</code>, <code>top_p</code>, <code>max_new_tokens</code>, <code>stop_sequences</code>, <code>precision</code>, <code>num_threads</code></td></tr>
     </tbody>
   </table></div>
 
@@ -3249,7 +3273,7 @@ model:
   <figure class="fx-diagram">
     <div class="flow">
       <div class="flow-row">
-        <div class="fnode small">readers<br><span class="small">txt · jsonl · csv · json</span></div>
+        <div class="fnode small">readers<br><span class="small">text · code · records · zip/tar</span></div>
         <span class="farrow h">&#8594;</span>
         <div class="fnode small">cleaner<br><span class="small">filter · dedup · normalize</span></div>
         <span class="farrow h">&#8594;</span>
@@ -3422,8 +3446,10 @@ evaluation:
 
   <p><strong>Fontaine's staging:</strong> the local engine already separates concerns cleanly — checkpoint
   loading, the KV cache, sampling, and streaming each live behind their own small piece. The production ladder
-  adds infrastructure <em>around</em> the Generator, never inside it. Even quantization (smaller number formats
-  for serving, Ch 31) is a load-time change behind the same interface.</p>
+  adds infrastructure <em>around</em> the Generator, never inside it. Quantization (smaller number formats
+  for serving, Ch 31) already works this way: <code>--precision int8</code> (the CPU default for models of
+  20 M parameters or more) converts the weights once at load time, behind the same interface, and the chat API
+  reports the format as <code>Q8_0</code>.</p>
 
   <div class="callout co-key"><div class="callout-title"><i class="bi bi-lightbulb"></i>Key Takeaways</div>
     <ul class="keypoints mb-0">
@@ -3449,8 +3475,8 @@ evaluation:
 <section class="chapter" id="ch-41" data-chapter data-nav-title="Development Roadmap">
   <span class="chapter-id-chip">Chapter 41</span>
   <h2 class="chapter-title">Development Roadmap</h2>
-  <p class="chapter-intro">The build order that matches the learning order. Phases 0–6 exist in the current
-  Fontaine repository (tests green, end to end); 7+ are the designed future.</p>
+  <p class="chapter-intro">The build order that matches the learning order. Phases 0–7b exist in the current
+  Fontaine repository (tests green, end to end); 8+ are the designed future.</p>
 
   <div class="fx-timeline">
     <div class="tl-item"><div class="tl-when">Phase 0 — done</div><h5>Learn the concepts</h5>
@@ -3469,6 +3495,8 @@ evaluation:
       <p>Atomic, hashed, resumable saves. <b>Success:</b> kill a run mid-training, resume, metrics continue seamlessly.</p></div>
     <div class="tl-item"><div class="tl-when">Phase 7 — done</div><h5>Evaluation &amp; inference</h5>
       <p>Registry-based validation loss/perplexity; KV-cached generation with sampling controls. <b>Success:</b> <code>fontaine generate</code> answers from a checkpoint, reproducibly.</p></div>
+    <div class="tl-item"><div class="tl-when">Phase 7b — done</div><h5>Chat serving and the CPU ladder</h5>
+      <p>An Ollama-compatible API behind Open WebUI (model name Yami v1.0); the Yami Nano–Large configs with QK-norm and sliding windows; int8 CPU inference; <code>fontaine model recommend</code>; readers for code, records, and zip/tar archives. <b>Success:</b> any tier loads and generates on a CPU. Training them on real data is still ahead.</p></div>
     <div class="tl-item future"><div class="tl-when">Phase 8 — next</div><h5>Fine-tuning</h5>
       <p>Instruction datasets, response-only loss. <b>Success:</b> a pretrained checkpoint becomes visibly instruction-following.</p></div>
     <div class="tl-item future"><div class="tl-when">Phase 9 — future</div><h5>Multi-GPU</h5>
@@ -3799,7 +3827,7 @@ evaluation:
     <div class="accordion-item"><h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#f6">Can Fontaine learn Bengali? (or any specific language)</button></h3>
       <div id="f6" class="accordion-collapse collapse" data-bs-parent="#faqAcc"><div class="accordion-body">Yes, with two ingredients: training data in that language, and a tokenizer whose vocabulary serves its script well (Ch 7–8). Byte-level tokenizers guarantee the script is representable; adding language data and retraining the tokenizer/model is the supported path. A dedicated multilingual tokenizer is the better long-term choice.</div></div></div>
     <div class="accordion-item"><h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#f7">Can I train it on my own documents?</button></h3>
-      <div id="f7" class="accordion-collapse collapse" data-bs-parent="#faqAcc"><div class="accordion-body">That is the entire design — &ldquo;your own data&rdquo; is Fontaine's first principle (Ch 5). Drop your text/JSONL/CSV/JSON into the pipeline, and the manifest records provenance and licensing (Ch 6). For teaching a model your documents' <em>facts</em> for lookup, also consider retrieval systems feeding the context window — fine-tuning shapes style and behavior more than it uploads facts (Ch 27).</div></div></div>
+      <div id="f7" class="accordion-collapse collapse" data-bs-parent="#faqAcc"><div class="accordion-body">That is the entire design — &ldquo;your own data&rdquo; is Fontaine's first principle (Ch 5). Drop your text, code, JSONL/JSON/CSV/Parquet records, or a zip of them into the pipeline, and the manifest records provenance and licensing (Ch 6). For teaching a model your documents' <em>facts</em> for lookup, also consider retrieval systems feeding the context window — fine-tuning shapes style and behavior more than it uploads facts (Ch 27).</div></div></div>
     <div class="accordion-item"><h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#f8">Can I make it understand my company's data?</button></h3>
       <div id="f8" class="accordion-collapse collapse" data-bs-parent="#faqAcc"><div class="accordion-body">Two complementary paths: fine-tuning on company data teaches voice, format, and domain patterns (Ch 27–28); retrieval-augmented systems place the relevant company document into the context window at question time (Ch 13). Mature products combine both. Mind privacy and licensing before training on anything sensitive (Ch 6).</div></div></div>
     <div class="accordion-item"><h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#f9">Can I eventually make it multimodal (images, audio)?</button></h3>

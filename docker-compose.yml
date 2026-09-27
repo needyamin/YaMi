@@ -36,6 +36,8 @@ services:
   # Talks to the `web` service over the Ollama API; the served checkpoint
   # shows up in its model picker. First start pulls a large image and the UI
   # needs a minute to boot. WEBUI_AUTH=false skips the sign-up wall.
+  # The volume keeps the embedding model from the first boot, so later starts
+  # do not download it again.
   # ---------------------------------------------------------------------------
   webui:
     image: ghcr.io/open-webui/open-webui:main

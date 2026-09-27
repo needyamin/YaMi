@@ -13,6 +13,10 @@ Architectural targets — not promises that any size trains on the initial
 | Coding Low | 5.7 M active / 22 M total | 256 × 6, 8 experts top-1 | 512 | ~0.3 GB | laptop CPU, 16 GB RAM |
 | Coding Mid | 39 M active / 114 M total | 512 × 8, 8 experts top-2 | 1024 | ~1.8 GB | desktop CPU or free GPU |
 | Coding High | 129 M active / 384 M total | 768 × 12, 8 experts top-2 | 2048 | ~6 GB | GPU to train; workstation CPU to run |
+| Yami Nano | 25 M dense | 384 × 8 | 2048 | ~0.4 GB | any 4-core CPU, 4-8 GB RAM |
+| Yami Small | 115 M dense | 768 × 12 | 4096 | ~1.8 GB | laptop CPU, 8-16 GB RAM |
+| Yami Base | 323 M dense | 1024 × 24 | 4096 | ~5.2 GB | 8+ core desktop CPU, 16-32 GB RAM |
+| Yami Large | 1.06 B dense | 2048 × 22 | 8192 | ~17 GB | 12+ core workstation CPU, 32 GB+ RAM |
 | Fontaine Large | 400–700 M | 1024 × 24 | 2048 | 40–80 GB | single A100/H100 class |
 | Fontaine XL | 1–4 B | 2048 × 24–32 | 4096 | multi-GPU | 4–8 GPUs, FSDP/ZeRO |
 | Distributed Fontaine | 8–70 B+ | 4096–8192 × 32–80 | 8k–128k | cluster | multi-node FSDP + TP/PP |
@@ -22,6 +26,30 @@ parameters count every expert (that is what AdamW stores); active parameters
 are what one token multiplies. `fontaine model inspect` prints both.
 
 Context lengths assume RoPE theta scaling plus training-data length mix.
+
+## Yami CPU ladder
+
+The Yami rows (`configs/model/yami_*.yaml`) are counted at a 32k vocabulary
+and share one recipe: GQA, SwiGLU, RMSNorm, RoPE with theta 500000, QK-norm,
+and tied embeddings. Base and Large also use sliding-window attention, with
+three 1024-token local layers for each global layer. The "hardware tier"
+column is where each size **runs**. Training Base and Large still wants a
+GPU (the column before it is AdamW state alone).
+
+Serving memory with int8 weights and a full-context KV cache, from
+`fontaine model inspect`:
+
+| Tier | fp32 weights | int8 weights | KV cache (full window) |
+| --- | --- | --- | --- |
+| Nano | 96 MiB | 72 MiB | 16 MiB |
+| Small | 438 MiB | 206 MiB | 96 MiB |
+| Base | 1.20 GiB | 436 MiB | 192 MiB |
+| Large | 3.95 GiB | 1.24 GiB | 704 MiB |
+
+`fontaine model recommend` reads the core count and RAM and prints the
+largest tier that fits. On an AVX2 laptop CPU, int8 decodes at roughly fp32
+speed for Small and about 20% faster for Base; the main gain is memory. CPUs
+with VNNI or AMX gain more.
 
 ## Scaling dimensions and what they hit
 

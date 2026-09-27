@@ -65,6 +65,25 @@ def test_top1_runs_each_expert_only_on_its_tokens():
     assert seen == {0: 1, 1: 1, 2: 1, 3: 1}
 
 
+def test_sorted_dispatch_matches_a_per_token_reference():
+    torch.manual_seed(0)
+    config = _moe_config(num_experts=4, num_experts_per_token=2)
+    moe = MixtureOfExperts(config).eval()
+    x = torch.randn(2, 5, config.hidden_size)
+    with torch.no_grad():
+        y, _ = moe(x)
+        probs = F.softmax(moe.router(x), dim=-1)
+        top_v, top_i = torch.topk(probs, 2, dim=-1)
+        top_v = top_v / top_v.sum(dim=-1, keepdim=True)
+        expected = torch.zeros_like(x)
+        for b in range(2):
+            for t in range(5):
+                for slot in range(2):
+                    expert = moe.experts[int(top_i[b, t, slot])]
+                    expected[b, t] += top_v[b, t, slot] * expert(x[b, t][None])[0]
+    assert torch.allclose(y, expected, atol=1e-5)
+
+
 def test_aux_loss_is_omitted_when_coef_is_zero():
     config = _moe_config(moe_aux_loss_coef=0.0)
     model = build_model(config)

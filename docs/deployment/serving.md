@@ -2,12 +2,17 @@
 
 ## Today: local dev API
 
-`fontaine serve` (stdlib-only) exposes two API families.
+`fontaine serve` (stdlib-only) exposes two API families. Open WebUI is the
+chat interface; it connects over the Ollama API.
 
-**Ollama-compatible** — lets off-the-shelf open-source chat UIs (Open WebUI
-and any other Ollama client) connect to a Fontaine checkpoint directly, with
-no model conversion. Streams are NDJSON (one JSON object per line), per the
-Ollama API contract:
+**Ollama-compatible** — Open WebUI and any other Ollama client connect to a
+Fontaine checkpoint directly, with no model conversion. Streams are NDJSON
+(one JSON object per line). `POST /api/show` includes `capabilities`,
+a `parameters` block (`num_ctx`, `temperature`, `top_k`, `top_p`,
+`repeat_penalty`, `num_predict`), and `<architecture>.context_length` inside
+`model_info`. `GET /api/ps` reports that same context length on the running
+model. `options.num_ctx` selects the window for one request and is clamped
+to the checkpoint maximum:
 
 ```
 GET  /api/version   → {"version": "..."}

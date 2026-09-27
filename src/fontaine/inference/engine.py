@@ -17,6 +17,13 @@ from fontaine.config.schema import InferenceConfig
 from fontaine.generation import SamplingConfig, sample_token
 from fontaine.models import FontaineModel, KVCache
 from fontaine.optimization import resolve_device
+from fontaine.optimization.quantize import (
+    QUANTIZATION_LEVELS,
+    apply_inference_precision,
+    estimate_loaded_bytes,
+    resolve_inference_precision,
+    set_num_threads,
+)
 from fontaine.tokenizer.base import Tokenizer
 from fontaine.utils.logging import get_logger
 
@@ -53,6 +60,11 @@ class Generator:
     Requests are serialized with a lock because the model and KV cache are
     shared; concurrent serving should run one Generator per worker process
     (see ``fontaine.inference.server`` and ``docs/deployment/serving.md``).
+
+    ``config.precision`` converts the weights once at load time (see
+    ``fontaine.optimization.quantize``). Parameter counts and weight size are
+    recorded first, because int8 modules no longer expose weights as
+    parameters.
     """
 
     def __init__(
@@ -65,9 +77,30 @@ class Generator:
         self.config = config or InferenceConfig()
         self.tokenizer = tokenizer
         self.device = resolve_device(device)
-        self.model = model.to(self.device)
-        self.model.eval()
+        self.num_threads = set_num_threads(self.config.num_threads)
+        self.parameter_count = model.num_parameters()
+        self.active_parameter_count = model.num_active_parameters()
+        self.precision = resolve_inference_precision(
+            self.config.precision, self.device, self.parameter_count
+        )
+        self.weight_bytes = estimate_loaded_bytes(model.float(), self.precision)
+        model = model.to(self.device)
+        model.eval()
+        self.model = apply_inference_precision(model, self.precision)
+        self.compute_dtype = torch.bfloat16 if self.precision == "bf16" else torch.float32
         self._lock = threading.Lock()
+        logger.info(
+            "inference precision=%s device=%s threads=%d parameters=%d",
+            self.precision,
+            self.device,
+            self.num_threads,
+            self.parameter_count,
+        )
+
+    @property
+    def quantization_level(self) -> str:
+        """Ollama-style label for the loaded weight format (F32, BF16, Q8_0)."""
+        return QUANTIZATION_LEVELS[self.precision]
 
     def _sampling(self, overrides: dict[str, object] | None) -> SamplingConfig:
         merged: dict[str, object] = {
@@ -87,25 +120,71 @@ class Generator:
         prompt: str,
         max_new_tokens: int | None = None,
         stream: bool = False,
+        *,
+        context_length: int | None = None,
         **overrides: object,
     ) -> str | Iterator[str]:
         """Generate a completion for ``prompt``.
 
         ``stream=True`` returns an iterator yielding text chunks; otherwise the
         full text is returned. Sampling knobs can be overridden per call
-        (``temperature=0.2``, ``stop_sequences=[...]``, ...).
+        (``temperature=0.2``, ``stop_sequences=[...]``, ...). ``context_length``
+        caps the window for this request (the checkpoint maximum still applies).
         """
         sampling = self._sampling(overrides)
         if max_new_tokens is not None:
             sampling = replace(sampling, max_new_tokens=max_new_tokens)
-        iterator = self._stream(prompt, sampling)
+        iterator = self._stream(prompt, sampling, context_length)
         if stream:
             return iterator
         return "".join(iterator)
 
+    def context_budget(
+        self,
+        prompt: str,
+        *,
+        context_length: int | None = None,
+        **overrides: object,
+    ) -> dict[str, object]:
+        """Report how a request fits the context window, without generating.
+
+        ``context_length`` is the caller's requested window (Ollama ``num_ctx``).
+        It is clamped to the checkpoint maximum. ``truncated`` is true when the
+        oldest prompt tokens would be dropped.
+        """
+        sampling = self._sampling(overrides)
+        window = self._resolve_window(context_length)
+        with self._lock:
+            prompt_len = len(self.tokenizer.encode(prompt))
+        kept, gen_budget = fit_context(prompt_len, sampling.max_new_tokens, window)
+        return {
+            "prompt_tokens": prompt_len,
+            "kept_tokens": kept,
+            "max_new_tokens": gen_budget,
+            "context_length": window,
+            "model_context_length": self.model.config.max_sequence_length,
+            "truncated": kept < prompt_len,
+        }
+
     # -- internals -------------------------------------------------------------
 
-    def _stream(self, prompt: str, sampling: SamplingConfig) -> Iterator[str]:
+    def _resolve_window(self, context_length: int | None) -> int:
+        """Clamp a requested context window to what this checkpoint can hold."""
+        limit = self.model.config.max_sequence_length
+        if context_length is None:
+            return limit
+        if isinstance(context_length, bool) or not isinstance(context_length, int):
+            raise ValueError("context_length must be an integer >= 2")
+        if context_length < 2:
+            raise ValueError(f"context_length must be >= 2, got {context_length}")
+        if context_length > limit:
+            logger.debug("context_length %d clamped to model maximum %d", context_length, limit)
+            return limit
+        return context_length
+
+    def _stream(
+        self, prompt: str, sampling: SamplingConfig, context_length: int | None = None
+    ) -> Iterator[str]:
         with self._lock:
             generator = (
                 torch.Generator(device=self.device.type).manual_seed(sampling.seed)
@@ -116,7 +195,7 @@ class Generator:
             kept, gen_budget = fit_context(
                 len(prompt_ids),
                 sampling.max_new_tokens,
-                self.model.config.max_sequence_length,
+                self._resolve_window(context_length),
             )
             if kept < len(prompt_ids):
                 logger.warning(
@@ -135,14 +214,14 @@ class Generator:
                 sampling = replace(sampling, max_new_tokens=gen_budget)
 
             cache = KVCache.from_config(
-                self.model.config, batch_size=1, device=self.device, dtype=torch.float32
+                self.model.config, batch_size=1, device=self.device, dtype=self.compute_dtype
             )
             input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=self.device)
             generated: list[int] = []
 
             with torch.inference_mode():
                 # Prefill: process the whole prompt at once, take last-position logits.
-                logits = self.model(input_ids, cache=cache).logits[0, -1]
+                logits = self.model(input_ids, cache=cache).logits[0, -1].float()
                 cache.advance(len(prompt_ids))
                 emitted = 0  # chars of the decoded completion already streamed
                 for step in range(sampling.max_new_tokens):
@@ -163,7 +242,7 @@ class Generator:
                     if step + 1 < sampling.max_new_tokens:
                         # Decode one token with the KV cache (O(1) per step).
                         one = torch.tensor([[next_id]], dtype=torch.long, device=self.device)
-                        logits = self.model(one, cache=cache).logits[0, -1]
+                        logits = self.model(one, cache=cache).logits[0, -1].float()
                         cache.advance(1)
 
 

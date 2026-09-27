@@ -136,3 +136,91 @@ def test_param_count_matches_analytic_estimate():
     counts = estimate_parameter_count(config)
     assert model.num_parameters() == counts["total"]
     assert model.num_active_parameters() == counts["active"]
+
+
+def test_qk_norm_adds_head_norms_and_matches_estimate():
+    from fontaine.models import build_model
+    from fontaine.optimization import estimate_parameter_count
+
+    plain = build_model(_tiny_model_config())
+    config = _tiny_model_config(qk_norm=True)
+    normed = build_model(config)
+    assert normed.blocks[0].attn.q_norm is not None
+    assert normed.num_parameters() - plain.num_parameters() == 2 * config.head_dim * config.num_layers
+    assert normed.num_parameters() == estimate_parameter_count(config)["total"]
+
+
+def test_layer_window_alternates_local_and_global():
+    config = _tiny_model_config(num_layers=4, sliding_window=8, global_attention_every=2)
+    assert [config.layer_window(i) for i in range(4)] == [8, 0, 8, 0]
+    assert _tiny_model_config(sliding_window=8).layer_window(1) == 8
+    assert _tiny_model_config().layer_window(0) == 0
+
+
+def test_attention_mask_limits_keys_to_the_window():
+    from fontaine.models.components import attention_mask
+
+    mask = attention_mask(0, 6, 6, window=3, device=torch.device("cpu"))
+    assert mask[5].tolist() == [False, False, False, True, True, True]
+    assert mask[1].tolist() == [True, True, False, False, False, False]
+    causal = attention_mask(4, 2, 6, window=0, device=torch.device("cpu"))
+    assert causal[0].tolist() == [True, True, True, True, True, False]
+
+
+def test_sliding_window_ignores_tokens_outside_the_window():
+    from fontaine.models import build_model
+
+    model = build_model(_tiny_model_config(num_layers=1, sliding_window=4)).eval()
+    prefix_a = torch.randint(0, 50, (1, 6))
+    prefix_b = torch.randint(0, 50, (1, 6))
+    tail = torch.randint(0, 50, (1, 4))
+    with torch.no_grad():
+        out_a = model(torch.cat([prefix_a, tail], dim=1)).logits[:, -1]
+        out_b = model(torch.cat([prefix_b, tail], dim=1)).logits[:, -1]
+    assert torch.allclose(out_a, out_b, atol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"qk_norm": True},
+        {"sliding_window": 6, "global_attention_every": 2},
+        {"rope_scaling_type": "ntk", "rope_scaling_factor": 2.0},
+    ],
+)
+def test_kv_cache_matches_full_forward_with_modern_options(overrides):
+    from fontaine.models import build_model
+
+    model = build_model(_tiny_model_config(**overrides)).eval()
+    tokens = torch.randint(0, 50, (1, 20))
+    with torch.no_grad():
+        full = model(tokens).logits
+        cache = KVCache.from_config(model.config, batch_size=1, device="cpu")
+        parts = [model(tokens[:, :7], cache=cache).logits]
+        cache.advance(7)
+        for pos in range(7, 20):
+            parts.append(model(tokens[:, pos : pos + 1], cache=cache).logits)
+            cache.advance(1)
+        cached = torch.cat(parts, dim=1)
+    assert torch.allclose(full, cached, atol=1e-5)
+
+
+def test_rope_scaling_linear_and_ntk():
+    cos, sin = build_rope_cache(16, 8, theta=10000.0, device="cpu")
+    lin_cos, _ = build_rope_cache(
+        16, 8, theta=10000.0, device="cpu", scaling_type="linear", scaling_factor=2.0
+    )
+    assert torch.allclose(lin_cos[4], cos[2], atol=1e-6)
+    ntk_cos, _ = build_rope_cache(
+        16, 8, theta=10000.0, device="cpu", scaling_type="ntk", scaling_factor=4.0
+    )
+    assert torch.allclose(ntk_cos[:, 0], cos[:, 0])  # the fastest dimension is unchanged
+    assert not torch.allclose(ntk_cos[:, -1], cos[:, -1])
+    with pytest.raises(ValueError, match="rope scaling"):
+        build_rope_cache(16, 8, theta=10000.0, device="cpu", scaling_type="yarn")
+
+
+def test_apply_rope_keeps_input_dtype():
+    cos, sin = build_rope_cache(4, 8, theta=10000.0, device="cpu")
+    x = torch.randn(1, 1, 4, 8, dtype=torch.bfloat16)
+    assert apply_rope(x, cos, sin).dtype == torch.bfloat16

@@ -39,7 +39,7 @@ trainer changes (test-enforced); `fontaine evaluate` works standalone.
 penalty/stop sequences/max tokens; streaming deltas; deterministic seeding;
 `fontaine generate` + dev `/generate` API; generation correctness tests pass.
 The same server now also speaks the Ollama-compatible chat API used by
-Open WebUI (`/api/chat`, `/api/tags`, `/api/ps`); see
+Open WebUI (`/api/chat`, `/api/tags`, `/api/ps`, `/api/show`); see
 `docs/deployment/serving.md`.
 
 ## Phase 7 — Fine-Tuning (next)

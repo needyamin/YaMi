@@ -14,21 +14,15 @@ import argparse
 import json
 from pathlib import Path
 
+from fontaine.data.records import render_instruction
 from fontaine.utils.logging import get_logger
 
 logger = get_logger("tools")
 
-_WITH_INPUT = (
-    "### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:\n{output}"
-)
-_WITHOUT_INPUT = "### Instruction:\n{instruction}\n\n### Response:\n{output}"
-
 
 def render_document(instruction: str, inp: str, output: str) -> str:
     """Render one Alpaca record; the Input block is omitted when empty."""
-    if inp.strip():
-        return _WITH_INPUT.format(instruction=instruction, input=inp, output=output)
-    return _WITHOUT_INPUT.format(instruction=instruction, output=output)
+    return render_instruction(instruction, output, inp=inp)
 
 
 def convert(input_path: Path, output_path: Path) -> int:

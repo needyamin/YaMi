@@ -10,6 +10,7 @@ import pytest
 from fontaine.config.schema import InferenceConfig
 from fontaine.inference import Generator, build_server, infer_model_name
 from fontaine.inference.chat_template import ChatTemplateError, build_chat_prompt
+from fontaine.inference.server import chat_status_reply
 from fontaine.models import build_model
 
 
@@ -154,13 +155,61 @@ def test_version_and_tags(api_base):
     assert models[0]["details"]["parameter_size"].endswith("M")
 
 
-def test_root_status_json(api_base):
+def test_show_advertises_context_like_an_ollama_model(api_base):
     status = _get(api_base, "/")
     assert status["model"] == "test-run"
+    assert status["context_length"] >= 2
     assert "/api/chat" in status["endpoints"]["ollama"]
     assert "/api/ps" in status["endpoints"]["ollama"]
     assert status["active_parameter_count"] == status["parameter_count"]
     assert status["active_parameter_count"] > 0
+
+    shown = _post(api_base, "/api/show", {"name": "test-run"})
+    assert shown["context_length"] == status["context_length"]
+    assert shown["capabilities"] == ["completion"]
+    assert any(key.endswith(".context_length") for key in shown["model_info"])
+    for line in (
+        f"num_ctx {status['context_length']}",
+        "temperature ",
+        "top_k ",
+        "top_p ",
+        "repeat_penalty ",
+        "num_predict ",
+    ):
+        assert line in shown["parameters"]
+        assert f"PARAMETER {line.strip()}" in shown["modelfile"] or line in shown["modelfile"]
+
+    running = _get(api_base, "/api/ps")["models"]
+    assert running[0]["context_length"] == status["context_length"]
+
+    preview = _post(
+        api_base,
+        "/api/context",
+        {
+            "messages": [{"role": "user", "content": "x" * 200}],
+            "options": {"num_ctx": 16, "num_predict": 4},
+        },
+    )
+    assert preview["truncated"] is True
+    assert preview["context_length"] == 16
+    assert preview["kept_tokens"] + preview["max_new_tokens"] <= 16
+    assert preview["model_context_length"] == status["context_length"]
+
+    with pytest.raises(HTTPError) as excinfo:
+        _post(api_base, "/api/context", {"options": {"num_ctx": 1}})
+    assert excinfo.value.code == 400
+
+    reply = _post(
+        api_base,
+        "/api/chat",
+        {
+            "messages": [{"role": "user", "content": "the fontaine"}],
+            "stream": False,
+            "options": {"num_ctx": 32, "num_predict": 4},
+        },
+    )
+    assert reply["done"] is True
+    assert isinstance(reply["message"]["content"], str)
 
 
 def test_running_models_endpoint(api_base):
@@ -178,8 +227,8 @@ def test_chat_non_streaming(api_base):
     )
     assert response["done"] is True
     assert response["message"]["role"] == "assistant"
-    # The untrained toy model may emit EOS immediately; only the shape is asserted.
-    assert isinstance(response["message"]["content"], str)
+    # A silent checkpoint still fills the bubble with why the reply is empty.
+    assert response["message"]["content"].strip()
 
 
 def test_chat_streaming_ndjson_shape(api_base):
@@ -197,7 +246,12 @@ def test_chat_streaming_ndjson_shape(api_base):
     assert final["done"] is True
     assert final["done_reason"] == "stop"
     assert final["eval_count"] == len(lines) - 1
-    assert final["message"]["content"] == ""
+    spoken = "".join(line["message"]["content"] for line in lines[:-1])
+    if spoken.strip():
+        assert final["message"]["content"] == ""
+    else:
+        assert "returned no text" in final["message"]["content"]
+        assert "request reached the model" in final["message"]["content"]
 
 
 def test_generate_endpoint_non_streaming_and_streaming(api_base):
@@ -208,6 +262,27 @@ def test_generate_endpoint_non_streaming_and_streaming(api_base):
     assert len(lines) >= 2  # the toy model greedily continues raw prompts
     assert all(line["done"] is False and line["response"] for line in lines[:-1])
     assert lines[-1]["done"] is True and lines[-1]["response"] == ""
+
+
+def test_chat_status_reply_explains_silence_and_errors():
+    silent = chat_status_reply("Yami v1.0")
+    assert silent.startswith("Yami v1.0 returned no text.")
+    assert "request reached the model" in silent
+
+    clipped = chat_status_reply(
+        "Yami v1.0",
+        budget={
+            "truncated": True,
+            "kept_tokens": 19,
+            "prompt_tokens": 43,
+            "context_length": 32,
+        },
+    )
+    assert "kept 19 of 43 tokens" in clipped
+    assert "window of 32" in clipped
+
+    failed = chat_status_reply("Yami v1.0", error="out of memory")
+    assert failed == "Yami v1.0 stopped with an error: out of memory"
 
 
 def test_chat_rejects_bad_messages(api_base):

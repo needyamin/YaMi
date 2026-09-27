@@ -1,0 +1,23 @@
+# Yami Nano — any CPU: 4 cores and 4-8 GB RAM, including old laptops.
+# Dense decoder with the modern stack: GQA, SwiGLU, RMSNorm, RoPE, QK-norm.
+# Train with data.sequence_length <= max_sequence_length.
+# Set vocab_size: auto to adopt a trained tokenizer; counts in the docs assume 32768.
+model:
+  architecture: decoder_transformer
+  cpu_tier: "nano — any 4-core CPU, 4-8 GB RAM"
+  vocab_size: 32768
+  hidden_size: 384
+  num_layers: 8
+  num_attention_heads: 6
+  num_kv_heads: 2
+  intermediate_size: 1024
+  max_sequence_length: 2048
+  rope_theta: 500000.0
+  qk_norm: true
+  dropout: 0.0
+  activation: swiglu
+  normalization: rmsnorm
+  norm_eps: 0.00001
+  tie_word_embeddings: true
+  attention_bias: false
+  mlp_bias: false

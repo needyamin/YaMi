@@ -12,7 +12,7 @@ Implemented in `src/fontaine/data/` and driven by
 
 | Stage | Module | Notes |
 | --- | --- | --- |
-| Reading | `sources.py` | `.txt` (paragraph-split), `.jsonl` (one doc/line; `text` or `prompt`+`response`), `.json` (array; loads fully — prefer JSONL), `.csv` (text column). Directories are walked recursively. Everything streams. |
+| Reading | `sources.py`, `records.py` | Files, directories, and archives; see "Supported raw data" below. Everything streams, and nothing is extracted to disk. |
 | Validation | `cli data validate` | readability, format errors, document/char stats; manifest mode verifies SHA-256 checksums |
 | Cleaning / filtering / normalization | `cleaning.py` | NFKC unicode normalize, whitespace strip, min/max char filters, empty-drop |
 | Deduplication | `cleaning.py` | exact-document dedup via 16-byte BLAKE2b fingerprints (memory-bounded) |
@@ -23,6 +23,43 @@ Implemented in `src/fontaine/data/` and driven by
 
 A document-level seeded split (`data.val_fraction`) carves out validation
 shards, so evaluation never sees training documents.
+
+## Supported raw data
+
+Point `data.raw_paths` at any mix of files, folders, and archives.
+
+| Kind | Extensions | One document is |
+| --- | --- | --- |
+| Plain text | `.txt`, `.text` | a paragraph (split on blank lines) |
+| Prose and markup | `.md`, `.rst`, `.tex`, `.html`, `.xml`, `.srt`, ... | the whole file |
+| Source code | `.py`, `.js`, `.ts`, `.java`, `.c`, `.cpp`, `.go`, `.rs`, `.sql`, `.sh`, `.yaml`, `Dockerfile`, ... | the whole file |
+| Records | `.jsonl`, `.ndjson`, `.json`, `.csv`, `.tsv`, `.parquet` | one record |
+| Notebooks | `.ipynb` | the markdown and code cells |
+| Archives | `.zip`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tar.xz` | each member, read by its own extension; nested archives work |
+| Compression | `.gz`, `.bz2`, `.xz`, `.zst` on any file above | the inner file |
+
+Records can use any of these layouts (field names are case-insensitive):
+
+- `text`, or another text field: `content`, `body`, `code`, `document`, ...
+- chat: `messages` / `conversations` with `{role, content}` (OpenAI) or
+  `{from, value}` (ShareGPT);
+- instruction: `instruction` / `prompt` / `question` plus `output` /
+  `response` / `completion` / `answer`, with an optional Alpaca `input` and
+  `system`.
+
+Chat and instruction records are rendered in the same Alpaca layout that
+`/api/chat` builds at serve time (`### Instruction:` / `### Response:`), so
+the model learns the format it is prompted with. JSON files wrapped as
+`{"data": [...]}` are unwrapped.
+
+Hidden files, `__MACOSX/` folders, encrypted zip members, and unsupported
+types (images, binaries) are skipped with a warning. Text is decoded as UTF-8
+(BOM allowed) or BOM-marked UTF-16. `.parquet` needs `pyarrow` and `.zst`
+needs `zstandard`: `pip install -e ".[data]"` (the Docker image has both).
+
+Use the byte-level BPE tokenizer (`tokenizer.type=hf_bpe`) for mixed data.
+It encodes any language, symbol, or code without unknown tokens. The char
+tokenizer maps characters it did not see in training to `<|unk|>`.
 
 ## How huge datasets avoid huge RAM
 
@@ -43,10 +80,7 @@ shards, so evaluation never sees training documents.
 ## Future dataset types
 
 The reader layer is the only extension point:
-- conversations / chat: JSONL with `messages` — flatten or serialize with
-  speaker markers (a `conversation` reader).
-- code: typically plain text with language-tagged provenance; a code-aware
-  cleaner (license headers, minified-file filter).
+- code: a code-aware cleaner (license headers, minified-file filter).
 - multimodal: pairs (text, media-path) — encoders attach at the *model*
   layer (`docs/research/multimodal.md`); the token-shard contract gains a
   parallel media-shard format.

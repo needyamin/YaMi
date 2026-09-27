@@ -176,6 +176,7 @@ def cmd_tokenizer_test(args: argparse.Namespace) -> int:
 
 def cmd_model_inspect(args: argparse.Namespace) -> int:
     from fontaine.optimization import (
+        estimate_inference_memory,
         estimate_parameter_count,
         estimate_training_memory,
         format_bytes,
@@ -226,6 +227,60 @@ def cmd_model_inspect(args: argparse.Namespace) -> int:
     print("rule of thumb: parameters + gradients + AdamW states are about 16 bytes/parameter "
           f"({format_bytes(16 * counts['total'])} here, using total parameters) "
           "BEFORE activations.")
+    print()
+    print("estimated inference memory (full context window):")
+    for precision in ("fp32", "int8"):
+        serving = estimate_inference_memory(config.model, precision)
+        print(
+            f"  {precision}: weights={format_bytes(serving['weights'])}, "
+            f"kv_cache={format_bytes(serving['kv_cache'])}, total={format_bytes(serving['total'])}"
+        )
+    return 0
+
+
+def cmd_model_recommend(args: argparse.Namespace) -> int:
+    from fontaine.config.loader import load_fontaine_config
+    from fontaine.optimization import (
+        estimate_inference_memory,
+        estimate_parameter_count,
+        format_bytes,
+    )
+    from fontaine.optimization.hardware import (
+        TIER_CONFIGS,
+        YAMI_TIERS,
+        detect_hardware,
+        recommend_tier,
+    )
+
+    info = detect_hardware()
+    tier = recommend_tier(info)
+    ram = f"{info.total_ram_gib:.1f} GiB" if info.total_ram_gib is not None else "unknown"
+    print(f"cpu cores (logical):   {info.logical_cores or 'unknown'}")
+    print(f"ram:                   {ram}")
+    print(f"cpu capability:        {info.cpu_capability}")
+    print(f"native bf16:           {'yes' if info.bf16 else 'no'}")
+    print(f"cuda:                  {'yes' if info.cuda else 'no'}")
+    print()
+    root = Path(__file__).resolve().parents[3]
+    for name in YAMI_TIERS:
+        path = root / TIER_CONFIGS[name]
+        if not path.is_file():
+            path = Path(TIER_CONFIGS[name])
+        if not path.is_file():
+            print(f"  {name:<6} (config {TIER_CONFIGS[name]} not found)")
+            continue
+        model = load_fontaine_config([str(path)]).model
+        params = estimate_parameter_count(model)["total"]
+        serving = estimate_inference_memory(model, "int8")
+        marker = "  <- recommended" if name == tier else ""
+        print(
+            f"  {name:<6} {params / 1e6:7.0f}M params, int8 serving about "
+            f"{format_bytes(serving['total'])}{marker}"
+        )
+    print()
+    print(f"recommended tier: {tier} ({TIER_CONFIGS[tier]})")
+    print(f"train with:       --model-config {TIER_CONFIGS[tier]}")
+    print("serve with:       --precision auto (int8 weights on CPU)")
     return 0
 
 
@@ -329,6 +384,8 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     from fontaine.inference import load_generator
 
     config = _load(args)
+    # Metrics stay comparable with training when weights are not quantized.
+    config.inference.precision = "fp32"
     generator = load_generator(args.checkpoint, args.tokenizer_dir, config.inference, device="cpu")
     context = EvalContext(
         device="cpu",
@@ -365,6 +422,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
     from fontaine.inference import load_generator
 
     config = _load(args)
+    _apply_runtime_flags(config, args)
     generator = load_generator(args.checkpoint, args.tokenizer_dir, config.inference, device=args.device)
     if args.interactive:
         print("interactive generation — empty line exits")
@@ -383,6 +441,27 @@ def cmd_generate(args: argparse.Namespace) -> int:
         raise ConfigError("provide --prompt or use --interactive")
     _print_stream(generator, prompt, max_new_tokens=args.max_new_tokens)
     return 0
+
+
+def _apply_runtime_flags(config, args: argparse.Namespace) -> None:
+    """Let ``--precision`` and ``--threads`` override the inference config."""
+    if args.precision is not None:
+        config.inference.precision = args.precision
+    if args.threads is not None:
+        config.inference.num_threads = args.threads
+    config.inference.validate()
+
+
+def _add_runtime_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--precision",
+        choices=["auto", "fp32", "bf16", "int8"],
+        default=None,
+        help="weight format (default: inference.precision; auto = int8 on CPU for 20M+ params)",
+    )
+    parser.add_argument(
+        "--threads", type=int, default=None, help="CPU threads (0 = automatic)"
+    )
 
 
 def _print_stream(generator, prompt: str, max_new_tokens: int | None = None) -> None:
@@ -424,6 +503,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from fontaine.inference import load_generator, serve
 
     config = _load(args)
+    _apply_runtime_flags(config, args)
     generator = load_generator(args.checkpoint, args.tokenizer_dir, config.inference, device=args.device)
     serve(
         generator,
@@ -481,6 +561,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_config_arguments(p)
     p.add_argument("--tokenizer-dir", default=None, help="resolve vocab_size=auto exactly")
     p.set_defaults(func=cmd_model_inspect)
+    p = model_sub.add_parser("recommend", help="pick a Yami size tier for this machine")
+    p.set_defaults(func=cmd_model_recommend)
 
     train = sub.add_parser("train", help="train a model")
     _add_config_arguments(train)
@@ -504,6 +586,7 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--max-new-tokens", type=int, default=None)
     generate.add_argument("--interactive", action="store_true")
     generate.add_argument("--device", default="auto")
+    _add_runtime_arguments(generate)
     generate.set_defaults(func=cmd_generate)
 
     checkpoint = sub.add_parser("checkpoint", help="checkpoint utilities")
@@ -523,6 +606,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--checkpoint", required=True)
     serve.add_argument("--tokenizer-dir", required=True)
     serve.add_argument("--device", default="auto")
+    _add_runtime_arguments(serve)
     serve.set_defaults(func=cmd_serve)
 
     return parser

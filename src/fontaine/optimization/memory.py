@@ -81,6 +81,8 @@ def estimate_parameter_count(config: ModelConfig) -> dict[str, int]:
     attn = h * h + 2 * h * kv_dim + h * h
     if config.attention_bias:
         attn += h + kv_dim + kv_dim + h
+    if config.qk_norm:
+        attn += 2 * config.head_dim
 
     inter = config.intermediate_size
     if config.activation == "swiglu":
@@ -113,6 +115,38 @@ def estimate_parameter_count(config: ModelConfig) -> dict[str, int]:
         "active": active,
         "non_embedding": total - embedding - head,
     }
+
+
+def estimate_inference_memory(
+    config: ModelConfig, precision: str = "fp32", context_length: int | None = None
+) -> dict[str, int]:
+    """Bytes to serve one request: weights in ``precision`` plus a full KV cache.
+
+    ``int8`` keeps embeddings and norms in fp32 and stores each Linear weight
+    (including a tied output head's own copy) at one byte per value. The KV
+    cache runs in fp32, or bf16 for ``bf16``.
+    """
+    counts = estimate_parameter_count(config)
+    total = counts["total"]
+    h = config.hidden_size
+    embedding = int(config.vocab_size) * h
+    per_layer_norms = 2 * h + (2 * config.head_dim if config.qk_norm else 0)
+    norms = config.num_layers * per_layer_norms + h
+    if precision == "fp32":
+        weights = 4 * total
+    elif precision == "bf16":
+        weights = 2 * total
+    elif precision == "int8":
+        linear = total - embedding - norms
+        if config.tie_word_embeddings:
+            linear += embedding
+        weights = 4 * (embedding + norms) + linear
+    else:
+        raise ValueError(f"unknown inference precision {precision!r}")
+    window = context_length or config.max_sequence_length
+    kv_bytes = 2 if precision == "bf16" else 4
+    kv_cache = 2 * config.num_layers * config.num_kv_heads * config.head_dim * window * kv_bytes
+    return {"weights": weights, "kv_cache": kv_cache, "total": weights + kv_cache}
 
 
 def estimate_training_memory(

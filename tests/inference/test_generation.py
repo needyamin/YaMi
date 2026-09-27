@@ -86,3 +86,16 @@ def test_context_budget_keeps_short_prompt_and_shrinks_the_answer():
     kept, gen_budget = fit_context(prompt_len=20, max_new_tokens=256, max_sequence_length=256)
     assert kept == 20
     assert gen_budget == 236
+
+
+def test_requested_context_length_is_clamped_and_truncates(model_config, tokenizer):
+    generator = _generator(model_config, tokenizer, temperature=0.0, max_new_tokens=8)
+    report = generator.context_budget("x" * 80, context_length=16)
+    assert report["model_context_length"] == model_config.max_sequence_length
+    assert report["context_length"] == 16
+    assert report["truncated"] is True
+    assert report["kept_tokens"] + report["max_new_tokens"] <= 16
+    oversized = generator.context_budget("hi", context_length=10_000)
+    assert oversized["context_length"] == model_config.max_sequence_length
+    text = generator.generate("x" * 80, context_length=16)
+    assert isinstance(text, str)

@@ -37,7 +37,7 @@ def test_iter_jsonl_supports_instruction_layout(tmp_path):
     )
     docs = list(iter_jsonl_file(path))
     assert docs[0] == "plain"
-    assert docs[1] == "q\na"
+    assert docs[1] == "### Instruction:\nq\n\n### Response:\na"
     assert len(docs) == 2  # malformed line skipped with a warning
 
 

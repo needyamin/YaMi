@@ -20,6 +20,8 @@ VALID_ARCHITECTURES = ("decoder_transformer", "moe_decoder")
 VALID_ACTIVATIONS = ("swiglu", "gelu")
 VALID_NORMS = ("rmsnorm", "layernorm")
 VALID_PRECISIONS = ("auto", "fp32", "bf16", "fp16")
+VALID_ROPE_SCALING = ("none", "linear", "ntk")
+VALID_INFERENCE_PRECISIONS = ("auto", "fp32", "bf16", "int8")
 VALID_SCHEDULERS = ("cosine", "constant")
 VALID_TOKENIZER_TYPES = ("char", "hf_bpe")
 
@@ -58,6 +60,18 @@ class ModelConfig:
     num_experts: int = 1
     num_experts_per_token: int = 1
     moe_aux_loss_coef: float = 0.01
+    # RMSNorm on each query and key head before RoPE (Qwen3, Gemma 3, OLMo 2).
+    qk_norm: bool = False
+    # Local attention over the last ``sliding_window`` tokens (0 = full attention).
+    # With ``global_attention_every = k``, every k-th layer keeps full attention;
+    # 0 makes every layer local.
+    sliding_window: int = 0
+    global_attention_every: int = 0
+    # Stretch RoPE past the trained length: ``linear`` divides positions by the
+    # factor, ``ntk`` raises the wavelength base. Set max_sequence_length to the
+    # extended window.
+    rope_scaling_type: str = "none"
+    rope_scaling_factor: float = 1.0
     # Display label for ``fontaine model inspect`` (empty for the dense ladder).
     cpu_tier: str = ""
 
@@ -108,10 +122,26 @@ class ModelConfig:
             )
         if self.architecture == "moe_decoder" and self.num_experts < 2:
             raise ConfigError("moe_decoder requires model.num_experts >= 2")
+        if self.sliding_window < 0:
+            raise ConfigError("model.sliding_window must be >= 0 (0 = full attention)")
+        if self.global_attention_every < 0:
+            raise ConfigError("model.global_attention_every must be >= 0")
+        if self.rope_scaling_type not in VALID_ROPE_SCALING:
+            raise ConfigError(f"model.rope_scaling_type must be one of {VALID_ROPE_SCALING}")
+        if self.rope_scaling_factor < 1.0:
+            raise ConfigError("model.rope_scaling_factor must be >= 1.0")
 
     @property
     def head_dim(self) -> int:
         return self.hidden_size // self.num_attention_heads
+
+    def layer_window(self, layer_idx: int) -> int:
+        """Attention window for one layer; 0 means full causal attention."""
+        if self.sliding_window <= 0:
+            return 0
+        if self.global_attention_every > 0 and (layer_idx + 1) % self.global_attention_every == 0:
+            return 0
+        return self.sliding_window
 
 
 @dataclass
@@ -278,6 +308,11 @@ class InferenceConfig:
     seed: int | None = None
     # Name shown in chat model pickers (Ollama /api/tags, /api/ps, /api/show).
     model_name: str = "Yami v1.0"
+    # Weight format at inference: ``auto`` picks int8 on CPU for models of 20M
+    # parameters or more, bf16 on a GPU that supports it, fp32 otherwise.
+    precision: str = "auto"
+    # CPU threads for generation (0 = PyTorch's physical-core default).
+    num_threads: int = 0
     # Dev-only HTTP server.
     server_host: str = "127.0.0.1"
     server_port: int = 8321
@@ -295,6 +330,10 @@ class InferenceConfig:
             raise ConfigError("inference.max_new_tokens must be >= 1")
         if not isinstance(self.model_name, str) or not self.model_name.strip():
             raise ConfigError("inference.model_name must be a non-empty string")
+        if self.precision not in VALID_INFERENCE_PRECISIONS:
+            raise ConfigError(f"inference.precision must be one of {VALID_INFERENCE_PRECISIONS}")
+        if self.num_threads < 0:
+            raise ConfigError("inference.num_threads must be >= 0 (0 = automatic)")
 
 
 @dataclass

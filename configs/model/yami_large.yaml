@@ -1,0 +1,26 @@
+# Yami Large — workstation CPU: 12+ cores and 32 GB+ RAM (about 1B parameters).
+# Llama-style shape (TinyLlama 1.1B) plus QK-norm and sliding-window attention
+# (three 1024-token local layers per global layer).
+# Serve with precision auto (int8 on CPU): about 1.3 GB of weights (4.2 GB fp32).
+# Train on a GPU with gradient checkpointing; set vocab_size: auto for a trained tokenizer.
+model:
+  architecture: decoder_transformer
+  cpu_tier: "large — 12+ core workstation CPU, 32 GB+ RAM"
+  vocab_size: 32768
+  hidden_size: 2048
+  num_layers: 22
+  num_attention_heads: 32
+  num_kv_heads: 8
+  intermediate_size: 5632
+  max_sequence_length: 8192
+  rope_theta: 500000.0
+  qk_norm: true
+  sliding_window: 1024
+  global_attention_every: 4
+  dropout: 0.0
+  activation: swiglu
+  normalization: rmsnorm
+  norm_eps: 0.00001
+  tie_word_embeddings: true
+  attention_bias: false
+  mlp_bias: false

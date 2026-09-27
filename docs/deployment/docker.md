@@ -18,15 +18,15 @@ bind-mounted, so a new training run never requires a rebuild.
 
 ```bash
 cp .env.example .env        # then edit FONTAINE_CHECKPOINT if needed
-docker compose up -d web webui   # first start pulls ~1 GB + the Open WebUI image
+docker compose up -d web webui   # first start builds the CPU image and pulls Open WebUI
 ```
 
-Open **http://localhost:3000** — Open WebUI, the open-source Ollama-style
-chat interface. The model picker shows **Yami v1.0** (the name in
-`configs/inference/default.yaml`). Type an instruction and the answer
-streams back. (The `web` service speaks the Ollama API at
-http://localhost:8321 — any Ollama-compatible UI or client can connect the
-same way.)
+Open **http://localhost:3000** — Open WebUI. The model picker shows **Yami v1.0**
+(the name in `configs/inference/default.yaml`). Chat controls read the
+checkpoint context length from `/api/show` (`num_ctx`). A requested window
+larger than that maximum is clamped. The first Open WebUI boot can take a
+minute while it prepares its local files; later starts reuse the saved volume.
+The API is at http://localhost:8321.
 
 Programmatic API:
 
@@ -86,6 +86,5 @@ saved step via its `latest.json` pointer.
   the API.
 - This is the development server (stdlib `http.server`) with no auth — see
   [serving.md](serving.md) for the production path. Do not expose it to the
-  internet. Open WebUI runs with `WEBUI_AUTH=false` for convenience — flip it
-  on (`docker compose down webui && docker compose up -d webui` after removing
-  the env var) before ever exposing the UI beyond localhost.
+  internet. Open WebUI runs with `WEBUI_AUTH=false` for local development.
+  Turn that off before exposing the UI beyond localhost.

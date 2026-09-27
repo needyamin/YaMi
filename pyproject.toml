@@ -29,6 +29,8 @@ dependencies = [
 [project.optional-dependencies]
 # Fast byte-level BPE training/encoding (recommended for real tokenizers).
 bpe = ["tokenizers>=0.15"]
+# Extra raw-data formats: .parquet (pyarrow) and .zst compression (zstandard).
+data = ["pyarrow>=14", "zstandard>=0.22"]
 # Faster, safer checkpoint export format.
 safetensors = ["safetensors>=0.4"]
 dev = [

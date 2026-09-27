@@ -2,7 +2,7 @@
 ###############################################################################
 # Fontaine AI — CPU image for training and serving
 #
-#   docker compose up                 → web playground at http://localhost:8321
+#   docker compose up                 → API at http://localhost:8321, Open WebUI at :3000
 #   docker compose run --rm train     → one training run (tiny model)
 #
 # Design notes:
@@ -28,7 +28,7 @@ RUN pip install torch --index-url https://download.pytorch.org/whl/cpu
 # Install the project itself (bpe extra = fast byte-level tokenizers).
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
-RUN pip install --no-cache-dir ".[bpe]"
+RUN pip install --no-cache-dir ".[bpe,data]"
 
 # Configs are copied AND bind-mounted read-only in compose: baked copies make
 # `docker run` work standalone, the mount keeps edits rebuild-free.

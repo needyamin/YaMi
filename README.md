@@ -1,12 +1,14 @@
 # Fontaine AI
 
-A config-driven decoder-only language model (RoPE, grouped-query attention, SwiGLU, RMSNorm) that trains on one 16 GB machine and scales by changing YAML, not the code.
+<img src="docs/assets/yami-v1.0.png" alt="Yami v1.0" width="72">
+
+A config-driven decoder-only language model (RoPE, grouped-query attention, SwiGLU, RMSNorm, optional QK-norm, sliding-window attention, and mixture-of-experts) that trains on one 16 GB machine, runs on CPUs from laptops to workstations, and scales by changing YAML, not the code.
 
 Chat name: **Yami v1.0**. Full guide: [docs/information.html](docs/information.html).
 
 ## Models
 
-Counts at an 8k vocabulary. Coding rows are mixture-of-experts: every expert is stored, and only the top experts run per token. Train with `data.sequence_length` equal to that model's context. `fontaine model inspect` prints the exact counts.
+Dense rows are counted at an 8k vocabulary; coding and Yami rows use the vocabulary in their file (8k to 32k). Coding rows are mixture-of-experts: every expert is stored, and only the top experts run per token. Keep `data.sequence_length` at or below the model's context. `fontaine model inspect` prints the exact counts.
 
 | Config | Params | Where it runs |
 | --- | --- | --- |
@@ -16,14 +18,19 @@ Counts at an 8k vocabulary. Coding rows are mixture-of-experts: every expert is 
 | `coding_low.yaml` | 5.7M active / 22M total | laptop CPU |
 | `coding_mid.yaml` | 39M active / 114M total | desktop CPU or a free GPU |
 | `coding_high.yaml` | 129M active / 384M total | GPU to train |
+| `yami_nano.yaml` | 25M dense | any 4-core CPU, 4-8 GB RAM |
+| `yami_small.yaml` | 115M dense | laptop CPU, 8-16 GB RAM |
+| `yami_base.yaml` | 323M dense | 8+ core desktop, 16-32 GB RAM |
+| `yami_large.yaml` | 1.06B dense | 12+ core workstation, 32 GB+ RAM |
 
-Larger sizes (0.4B and up) are the same code behind new configs. See [docs/scaling/roadmap.md](docs/scaling/roadmap.md).
+Yami rows are counted at a 32k vocabulary. They add QK-norm, and Base and Large add sliding-window attention. The server loads them as int8 on CPU (`--precision auto`), so Large uses about 1.3 GB of weights. `fontaine model recommend` picks the tier for your machine. See [docs/scaling/roadmap.md](docs/scaling/roadmap.md).
 
 ## Install
 
 ```bash
 pip install -e ".[bpe]"    # torch, numpy, pyyaml, byte-level BPE
 pip install -e ".[dev]"    # pytest and ruff, for tests
+pip install -e ".[data]"   # optional: .parquet and .zst datasets
 ```
 
 CPU PyTorch: `pip install torch --index-url https://download.pytorch.org/whl/cpu`
@@ -37,11 +44,11 @@ cp .env.example .env           # which checkpoint to serve, and the host ports
 docker compose up -d web webui # chat UI → http://localhost:3000  (model: Yami v1.0)
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The picker shows **Yami v1.0**. The API is [http://localhost:8321](http://localhost:8321) (`/api/chat`, `/api/tags`). Set the checkpoint in `.env` (`FONTAINE_CHECKPOINT`). Details: [docs/deployment/docker.md](docs/deployment/docker.md).
+Open [http://localhost:3000](http://localhost:3000). The picker shows **Yami v1.0**, and its context length is the checkpoint maximum. The API is [http://localhost:8321](http://localhost:8321) (`/api/chat`, `/api/tags`, `/api/show`). Set the checkpoint in `.env` (`FONTAINE_CHECKPOINT`). Details: [docs/deployment/docker.md](docs/deployment/docker.md).
 
 ## Train
 
-Put text or JSONL in `datasets/raw`, then:
+Put data in `datasets/raw`: text, Markdown, code, JSONL/JSON/CSV/Parquet (plain, chat, or instruction records), or `.zip`/`.tar` archives of them. Formats: [docs/data/pipeline.md](docs/data/pipeline.md). Then:
 
 ```bash
 # 0. plan resources (active and total parameters, training memory)
@@ -77,7 +84,7 @@ fontaine serve --checkpoint experiments/<run>/checkpoints \
   --tokenizer-dir datasets/tokenizer
 ```
 
-Reference tiny run on CodeAlpaca: 5,000 steps, `val_loss` 2.14, perplexity 8.5.
+An earlier tiny run on CodeAlpaca (5,000 steps) reached `val_loss` 2.14, perplexity 8.5. The only run in `experiments/` today is a 3.2M toy quickstart model, so chat replies are empty or random words until you train on real data. `serve` and `generate` take `--precision` (default `auto`: int8 on CPU from 20M parameters) and `--threads`.
 
 No local GPU: [docs/kaggle.md](docs/kaggle.md).
 
@@ -87,7 +94,7 @@ No local GPU: [docs/kaggle.md](docs/kaggle.md).
 | --- | --- |
 | `src/fontaine/` | model, data, train, serve |
 | `configs/` | model sizes and training |
-| `tests/` | 116 CPU tests |
+| `tests/` | 172 CPU tests |
 | `docs/` | design and how-to |
 | `datasets/`, `experiments/`, `checkpoints/` | your data and weights; not committed |
 

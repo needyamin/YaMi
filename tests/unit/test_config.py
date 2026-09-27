@@ -90,6 +90,31 @@ def test_moe_architecture_rules():
         ModelConfig(architecture="moe_decoder", num_experts=2, num_experts_per_token=3).validate()
 
 
+def test_modern_attention_options_validate():
+    ModelConfig(
+        qk_norm=True,
+        sliding_window=512,
+        global_attention_every=4,
+        rope_scaling_type="ntk",
+        rope_scaling_factor=2.0,
+    ).validate()
+    with pytest.raises(ConfigError, match="sliding_window"):
+        ModelConfig(sliding_window=-1).validate()
+    with pytest.raises(ConfigError, match="global_attention_every"):
+        ModelConfig(global_attention_every=-2).validate()
+    with pytest.raises(ConfigError, match="rope_scaling_type"):
+        ModelConfig(rope_scaling_type="yarn").validate()
+    with pytest.raises(ConfigError, match="rope_scaling_factor"):
+        ModelConfig(rope_scaling_type="linear", rope_scaling_factor=0.5).validate()
+
+
+def test_old_checkpoint_model_dict_loads_with_defaults():
+    config = dataclass_from_dict(ModelConfig, {"hidden_size": 64, "num_attention_heads": 4})
+    assert config.qk_norm is False
+    assert config.sliding_window == 0
+    assert config.rope_scaling_type == "none"
+
+
 def test_vocab_auto_accepted():
     ModelConfig(vocab_size="auto").validate()
     with pytest.raises(ConfigError, match="auto"):

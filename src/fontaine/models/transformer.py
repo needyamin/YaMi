@@ -60,7 +60,12 @@ class FontaineModel(nn.Module):
 
         # RoPE tables are derived state (not saved in checkpoints).
         cos, sin = build_rope_cache(
-            config.max_sequence_length, config.head_dim, config.rope_theta, device="cpu"
+            config.max_sequence_length,
+            config.head_dim,
+            config.rope_theta,
+            device="cpu",
+            scaling_type=config.rope_scaling_type,
+            scaling_factor=config.rope_scaling_factor,
         )
         self.register_buffer("rope_cos", cos, persistent=False)
         self.register_buffer("rope_sin", sin, persistent=False)

@@ -44,19 +44,34 @@ def build_norm(dim: int, kind: str, eps: float) -> nn.Module:
 
 
 def build_rope_cache(
-    seq_len: int, head_dim: int, theta: float, device: torch.device | str
+    seq_len: int,
+    head_dim: int,
+    theta: float,
+    device: torch.device | str,
+    scaling_type: str = "none",
+    scaling_factor: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Precompute cos/sin tables for RoPE: each has shape [seq_len, head_dim // 2].
 
     ``theta`` controls the wavelength base; larger theta (e.g. 1e6) extends
     useful context — the primary context-length scaling lever.
+
+    ``scaling_type`` stretches a trained window: ``linear`` divides positions
+    by ``scaling_factor`` (position interpolation); ``ntk`` raises the base by
+    ``factor ** (d / (d - 2))`` so high-frequency dimensions stay intact.
     """
     if head_dim % 2 != 0:
         raise ValueError(f"RoPE requires an even head_dim, got {head_dim}")
+    if scaling_type == "ntk" and scaling_factor > 1.0 and head_dim > 2:
+        theta = theta * scaling_factor ** (head_dim / (head_dim - 2))
+    elif scaling_type not in ("none", "linear", "ntk"):
+        raise ValueError(f"unknown rope scaling type: {scaling_type!r}")
     inv_freq = 1.0 / (
         theta ** (torch.arange(0, head_dim, 2, device=device, dtype=torch.float32) / head_dim)
     )
     positions = torch.arange(seq_len, device=device, dtype=torch.float32)
+    if scaling_type == "linear":
+        positions = positions / scaling_factor
     freqs = torch.outer(positions, inv_freq)  # [seq_len, head_dim // 2]
     return freqs.cos(), freqs.sin()
 
@@ -71,9 +86,35 @@ def apply_rope(
     """
     half = x.shape[-1] // 2
     x1, x2 = x[..., :half], x[..., half:]
-    cos = cos[None, None, :, :]
-    sin = sin[None, None, :, :]
+    cos = cos[None, None, :, :].to(x.dtype)
+    sin = sin[None, None, :, :].to(x.dtype)
     return torch.cat([x1 * cos - x2 * sin, x1 * sin + x2 * cos], dim=-1)
+
+
+def _probe_native_gqa() -> bool:
+    q = torch.zeros(1, 2, 1, 2)
+    kv = torch.zeros(1, 1, 1, 2)
+    try:
+        F.scaled_dot_product_attention(q, kv, kv, enable_gqa=True)
+    except (TypeError, RuntimeError):
+        return False
+    return True
+
+
+# SDPA reads shared K/V heads directly when torch supports ``enable_gqa``.
+NATIVE_GQA = _probe_native_gqa()
+
+
+def attention_mask(
+    query_start: int, query_len: int, key_len: int, window: int, device: torch.device
+) -> torch.Tensor:
+    """Boolean [query_len, key_len] mask: causal, and within ``window`` when > 0."""
+    query_pos = torch.arange(query_start, query_start + query_len, device=device)
+    key_pos = torch.arange(key_len, device=device)
+    allowed = key_pos[None, :] <= query_pos[:, None]
+    if window > 0:
+        allowed = allowed & (key_pos[None, :] > query_pos[:, None] - window)
+    return allowed
 
 
 class CausalSelfAttention(nn.Module):
@@ -85,10 +126,14 @@ class CausalSelfAttention(nn.Module):
     multi-GPU inference tractable. ``num_kv_heads == num_attention_heads``
     degenerates to standard MHA.
 
-    Two execution paths:
-    - no cache (training/prefill): fused causal SDPA, no explicit mask needed.
-    - with cache (incremental decode): explicit causal mask against the
-      cached prefix; ``cache.update`` is called per layer.
+    Masking:
+    - a query block starting at position 0 with full attention uses fused
+      causal SDPA (no explicit mask);
+    - one decode token with full attention sees the whole cache (no mask);
+    - sliding-window layers and chunked prefill build a boolean mask.
+
+    ``qk_norm`` normalizes each query/key head before RoPE. A layer's window
+    comes from ``ModelConfig.layer_window``.
     """
 
     def __init__(self, config: ModelConfig, layer_idx: int) -> None:
@@ -98,12 +143,18 @@ class CausalSelfAttention(nn.Module):
         self.num_kv_heads = config.num_kv_heads
         self.head_dim = config.head_dim
         self.dropout = config.dropout
+        self.window = config.layer_window(layer_idx)
         bias = config.attention_bias
 
         self.q_proj = nn.Linear(config.hidden_size, self.num_heads * self.head_dim, bias=bias)
         self.k_proj = nn.Linear(config.hidden_size, self.num_kv_heads * self.head_dim, bias=bias)
         self.v_proj = nn.Linear(config.hidden_size, self.num_kv_heads * self.head_dim, bias=bias)
         self.out_proj = nn.Linear(self.num_heads * self.head_dim, config.hidden_size, bias=bias)
+        self.q_norm: nn.Module | None = None
+        self.k_norm: nn.Module | None = None
+        if config.qk_norm:
+            self.q_norm = RMSNorm(self.head_dim, eps=config.norm_eps)
+            self.k_norm = RMSNorm(self.head_dim, eps=config.norm_eps)
 
     def forward(
         self,
@@ -119,6 +170,8 @@ class CausalSelfAttention(nn.Module):
         k = self.k_proj(x).view(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
         v = self.v_proj(x).view(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
 
+        if self.q_norm is not None and self.k_norm is not None:
+            q, k = self.q_norm(q), self.k_norm(k)
         q, k = apply_rope(q, cos, sin), apply_rope(k, cos, sin)
 
         # Store the shared K/V (num_kv_heads wide) BEFORE expanding heads for
@@ -126,25 +179,29 @@ class CausalSelfAttention(nn.Module):
         if cache is not None:
             k, v = cache.update(self.layer_idx, k, v)
 
-        # Grouped-query attention: expand shared K/V heads to match query heads.
-        if self.num_kv_heads != self.num_heads:
+        grouped = self.num_kv_heads != self.num_heads
+        sdpa_kwargs: dict[str, object] = {}
+        if grouped and NATIVE_GQA:
+            sdpa_kwargs["enable_gqa"] = True
+        elif grouped:
             repeat = self.num_heads // self.num_kv_heads
             k = k.repeat_interleave(repeat, dim=1)
             v = v.repeat_interleave(repeat, dim=1)
 
-        if cache is not None:
-            # Query at absolute position pos_offset+i may attend keys 0..pos_offset+i.
-            query_pos = torch.arange(pos_offset, pos_offset + seq_len, device=q.device)
-            key_pos = torch.arange(k.shape[2], device=q.device)
-            attn_mask = key_pos[None, :] <= query_pos[:, None]  # [T, cached+T]
-            y = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
-        else:
+        key_len = k.shape[2]
+        query_end = pos_offset + seq_len
+        windowed = self.window > 0 and query_end > self.window
+        dropout_p = self.dropout if self.training else 0.0
+        if not windowed and pos_offset == 0:
             y = F.scaled_dot_product_attention(
-                q,
-                k,
-                v,
-                dropout_p=self.dropout if self.training else 0.0,
-                is_causal=True,
+                q, k, v, dropout_p=dropout_p, is_causal=True, **sdpa_kwargs
+            )
+        elif not windowed and seq_len == 1:
+            y = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p, **sdpa_kwargs)
+        else:
+            mask = attention_mask(pos_offset, seq_len, key_len, self.window, q.device)
+            y = F.scaled_dot_product_attention(
+                q, k, v, attn_mask=mask, dropout_p=dropout_p, **sdpa_kwargs
             )
 
         y = y.transpose(1, 2).contiguous().view(batch, seq_len, -1)
@@ -209,20 +266,26 @@ class MixtureOfExperts(nn.Module):
 
         flat_x = x.reshape(-1, hidden)
         flat_i = top_i.reshape(-1, self.top_k)
-        flat_v = top_v.reshape(-1, self.top_k)
-        combined = flat_x.new_zeros(flat_x.shape)
-
-        for expert_id, expert in enumerate(self.experts):
-            mask = (flat_i == expert_id).any(dim=-1)
-            if not bool(mask.any().item()):
-                continue
-            index = mask.nonzero(as_tuple=True)[0]
-            selected = expert(flat_x.index_select(0, index))
-            weights = (flat_v * (flat_i == expert_id).to(flat_v.dtype)).sum(dim=-1)
-            weighted = selected * weights.index_select(0, index).unsqueeze(-1)
-            combined = combined + combined.new_zeros(combined.shape).index_add(0, index, weighted)
-
         n_tokens = flat_x.shape[0]
+
+        # Sort the (token, expert) pairs by expert once, then run each expert on
+        # one contiguous slice: a single host sync instead of one per expert.
+        expert_ids = flat_i.reshape(-1)
+        order = torch.argsort(expert_ids, stable=True)
+        token_ids = torch.arange(n_tokens, device=x.device).repeat_interleave(self.top_k)[order]
+        pair_weights = top_v.reshape(-1)[order].unsqueeze(-1).to(flat_x.dtype)
+        counts = torch.bincount(expert_ids, minlength=self.num_experts).tolist()
+
+        combined = flat_x.new_zeros(flat_x.shape)
+        start = 0
+        for expert, count in zip(self.experts, counts, strict=True):
+            if count == 0:
+                continue
+            tokens = token_ids[start : start + count]
+            out = expert(flat_x.index_select(0, tokens)) * pair_weights[start : start + count]
+            combined = combined.index_add(0, tokens, out)
+            start += count
+
         assignment = F.one_hot(flat_i, num_classes=self.num_experts).to(probs.dtype)
         fraction = assignment.sum(dim=(0, 1)) / (n_tokens * self.top_k)
         mean_prob = probs.reshape(-1, self.num_experts).mean(dim=0)
