@@ -583,6 +583,11 @@ class InferenceConfig:
     # Dev-only HTTP server.
     server_host: str = "127.0.0.1"
     server_port: int = 8321
+    # 0 keeps every routed expert in RAM. A positive cap, in MiB, spills those
+    # experts to disk and streams only the ones the router selects.
+    expert_budget_mb: int = 0
+    # Empty uses a temporary directory for the spilled experts.
+    expert_spill_dir: str = ""
 
     def validate(self) -> None:
         if self.temperature < 0:
@@ -617,6 +622,12 @@ class InferenceConfig:
                 "Set speculative_tokens to the number of draft tokens per step, "
                 "or clear draft_checkpoint."
             )
+        if isinstance(self.expert_budget_mb, bool) or not isinstance(self.expert_budget_mb, int):
+            raise ConfigError("inference.expert_budget_mb must be an integer >= 0")
+        if self.expert_budget_mb < 0:
+            raise ConfigError("inference.expert_budget_mb must be >= 0 (0 = keep every expert in RAM)")
+        if not isinstance(self.expert_spill_dir, str):
+            raise ConfigError("inference.expert_spill_dir must be a string")
 
 
 @dataclass

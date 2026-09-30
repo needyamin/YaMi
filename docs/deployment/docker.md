@@ -1,38 +1,40 @@
 # Running Fontaine in Docker
 
-Everything — training, serving, and the chat UI — runs from one CPU image
-plus the Open WebUI container. Model artifacts (tokenizer, prepared data,
-checkpoints) are **not** baked into the image; they live on the host and are
-bind-mounted, so a new training run never requires a rebuild.
+Training, serving, and the chat UI run from one CPU image. Model artifacts
+(tokenizer, prepared data, checkpoints) are **not** baked into the image; they
+live on the host and are bind-mounted, so a new training run never requires a
+rebuild. The chat UI is built into the image and served by the same process
+as the API.
 
 ## Files
 
 | File | Role |
 | --- | --- |
-| `Dockerfile` | CPU image: PyTorch (CPU wheels) + `fontaine-ai .[bpe]`, unprivileged user, health check |
-| `docker-compose.yml` | `web` (Ollama-compatible API, default), `webui` (Open WebUI chat interface), `train` (one-off run, `train` profile) |
+| `Dockerfile` | CPU image: chat UI build, PyTorch (CPU wheels) + `fontaine-ai .[bpe]`, unprivileged user, health check |
+| `docker-compose.yml` | `web` (chat UI and API, default), `train` (one-off run, `train` profile) |
 | `.dockerignore` | keeps data/models/caches out of the build context |
-| `.env.example` | template for choosing the served checkpoint and host ports |
+| `.env.example` | template for choosing the served checkpoint and host port |
 
 ## Quickstart (serve + chat)
 
 ```bash
 cp .env.example .env        # then edit FONTAINE_CHECKPOINT if needed
-docker compose up -d web webui   # first start builds the CPU image and pulls Open WebUI
+docker compose up -d web    # first start builds the CPU image, including the chat UI
 ```
 
-Open **http://localhost:3000** — Open WebUI. The model picker shows **Yami v1.0**
-(the name in `configs/inference/default.yaml`). Chat controls read the
-checkpoint context length from `/api/show` (`num_ctx`). A requested window
-larger than that maximum is clamped. The first Open WebUI boot can take a
-minute while it prepares its local files; later starts reuse the saved volume.
-The API is at http://localhost:8321.
+Open **http://localhost:8321**. The model picker shows **Yami v1.0**
+(the name in `configs/inference/default.yaml`). Chat uses
+`POST /v1/chat/completions`. Curl can use that route or the Ollama-compatible
+`/api/chat`.
 
 Programmatic API:
 
 ```bash
 curl http://localhost:8321/api/version
-curl http://localhost:8321/api/tags
+curl http://localhost:8321/v1/models
+curl -X POST http://localhost:8321/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "Say hi."}], "stream": false, "max_completion_tokens": 64}'
 curl -X POST http://localhost:8321/api/chat \
   -H "Content-Type: application/json" \
   -d '{"messages": [{"role": "user", "content": "Say hi."}], "stream": false, "options": {"num_predict": 64}}'
@@ -60,7 +62,7 @@ FONTAINE_CHECKPOINT=/app/experiments/<new-run-folder>/checkpoints
 ```
 
 ```bash
-docker compose up -d web webui   # recreates the containers with the new checkpoint
+docker compose up -d web   # recreates the container with the new checkpoint
 ```
 
 `checkpoints` (the folder, not a step inside it) always resolves to the newest
@@ -70,10 +72,10 @@ saved step via its `latest.json` pointer.
 
 | Task | Command |
 | --- | --- |
-| Logs | `docker compose logs -f web` / `docker compose logs -f webui` |
+| Logs | `docker compose logs -f web` |
 | Stop | `docker compose down` |
-| Rebuild after source changes | `docker compose up -d --build web webui` |
-| Different host ports | set `FONTAINE_PORT` / `WEBUI_PORT` in `.env` |
+| Rebuild after source changes | `docker compose up -d --build web` |
+| Different host port | set `FONTAINE_PORT` in `.env` |
 | Manually pick a step | `FONTAINE_CHECKPOINT=/app/experiments/<run>/checkpoints/step_00003000` |
 
 ## Security notes
@@ -85,6 +87,5 @@ saved step via its `latest.json` pointer.
   (`127.0.0.1:8321:8321`) and do not want other machines on your LAN to reach
   the API.
 - This is the development server (stdlib `http.server`) with no auth — see
-  [serving.md](serving.md) for the production path. Do not expose it to the
-  internet. Open WebUI runs with `WEBUI_AUTH=false` for local development.
-  Turn that off before exposing the UI beyond localhost.
+  [serving.md](serving.md) for the production path. Do not expose port 8321
+  to the internet.

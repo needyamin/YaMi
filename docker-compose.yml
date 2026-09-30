@@ -2,10 +2,9 @@ name: fontaine-ai
 
 services:
   # ---------------------------------------------------------------------------
-  # Inference API — speaks the Ollama API so off-the-shelf chat UIs connect.
+  # Chat UI and inference API. The UI is built into the image.
   #
-  #   docker compose up -d web webui     API: http://localhost:8321
-  #                                      UI:  http://localhost:3000 (Open WebUI)
+  #   docker compose up -d web          UI + API: http://localhost:8321
   #
   # The served checkpoint is chosen on the HOST side via FONTAINE_CHECKPOINT
   # (see .env.example) — pointing at the container path of a run folder:
@@ -28,32 +27,6 @@ services:
       --tokenizer-dir /app/datasets/tokenizer
       --inference-config /app/configs/inference/default.yaml
       --set inference.server_host=0.0.0.0
-    restart: unless-stopped
-
-  # ---------------------------------------------------------------------------
-  # Open WebUI — the ready-made open-source Ollama chat interface.
-  #
-  # Talks to the `web` service over the Ollama API; the served checkpoint
-  # shows up in its model picker. First start pulls a large image and the UI
-  # needs a minute to boot. WEBUI_AUTH=false skips the sign-up wall.
-  # The volume keeps the embedding model from the first boot, so later starts
-  # do not download it again.
-  # ---------------------------------------------------------------------------
-  webui:
-    image: ghcr.io/open-webui/open-webui:main
-    container_name: fontaine-webui
-    init: true
-    ports:
-      - "${WEBUI_PORT:-3000}:8080"
-    environment:
-      - OLLAMA_BASE_URL=http://web:8321
-      - ENABLE_OPENAI_API=false
-      - WEBUI_AUTH=false   # local dev: skip the sign-up wall
-    volumes:
-      - open-webui:/app/backend/data
-    depends_on:
-      web:
-        condition: service_healthy
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
@@ -80,6 +53,3 @@ services:
       --data-config /app/configs/data/default.yaml
       --tokenizer-dir /app/datasets/tokenizer
       --set data.manifest_path=/app/datasets/prepared/manifest.json
-
-volumes:
-  open-webui:

@@ -7,9 +7,11 @@ multi-GPU serving) replaces internals, not this interface — see
 ``docs/inference/architecture.md`` and ``docs/deployment/serving.md``.
 """
 
+import tempfile
 import threading
 from collections.abc import Iterator
 from dataclasses import replace
+from pathlib import Path
 
 import torch
 
@@ -87,6 +89,16 @@ class Generator:
             self.config.precision, self.device, self.parameter_count
         )
         self.weight_bytes = estimate_loaded_bytes(model.float(), self.precision)
+        self.expert_store = None
+        if self.config.expert_budget_mb > 0 and model.config.num_experts > 1:
+            from fontaine.inference.expert_store import attach_expert_streaming
+
+            spill = Path(self.config.expert_spill_dir) if self.config.expert_spill_dir else Path(
+                tempfile.mkdtemp(prefix="yami-experts-")
+            )
+            self.expert_store = attach_expert_streaming(
+                model, self.config.expert_budget_mb * 1024 * 1024, spill
+            )
         model = model.to(self.device)
         model.eval()
         self.model = apply_inference_precision(model, self.precision)
@@ -98,14 +110,38 @@ class Generator:
             self.compute_dtype = torch.float32
         if self.draft is not None:
             self.draft = self.draft.to(self.device).eval()
+        self.dense_store = None
+        if (
+            getattr(self.config, "dense_budget_mb", 0) or 0
+        ) > 0 and self.device.type == "cpu" and getattr(model, "mesh", None) is None:
+            from fontaine.inference.dense_store import attach_dense_streaming
+
+            spill = (
+                Path(self.config.dense_spill_dir)
+                if getattr(self.config, "dense_spill_dir", "")
+                else None
+            )
+            self.dense_store = attach_dense_streaming(
+                self.model, self.config.dense_budget_mb * 1024 * 1024, spill
+            )
         self._lock = threading.Lock()
         logger.info(
-            "inference precision=%s device=%s threads=%d parameters=%d",
+            "inference precision=%s device=%s threads=%d parameters=%d expert_budget_mb=%d",
             self.precision,
             self.device,
             self.num_threads,
             self.parameter_count,
+            self.config.expert_budget_mb,
         )
+        if self.dense_store is not None:
+            stats = self.dense_store.stats()
+            logger.info(
+                "dense streaming blocks=%d resident_bytes=%d capacity_bytes=%d dir=%s",
+                len(self.dense_store),
+                stats.resident_bytes,
+                stats.capacity_bytes,
+                self.dense_store.directory,
+            )
 
     @property
     def quantization_level(self) -> str:

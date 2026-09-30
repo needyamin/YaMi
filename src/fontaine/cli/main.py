@@ -472,18 +472,33 @@ def _apply_runtime_flags(config, args: argparse.Namespace) -> None:
         config.inference.precision = args.precision
     if args.threads is not None:
         config.inference.num_threads = args.threads
+    if getattr(args, "expert_budget_mb", None) is not None:
+        config.inference.expert_budget_mb = args.expert_budget_mb
+    if getattr(args, "expert_spill_dir", None):
+        config.inference.expert_spill_dir = args.expert_spill_dir
     config.inference.validate()
 
 
 def _add_runtime_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--precision",
-        choices=["auto", "fp32", "bf16", "int8"],
+        choices=["auto", "fp32", "fp16", "bf16", "int8"],
         default=None,
         help="weight format (default: inference.precision; auto = int8 on CPU for 20M+ params)",
     )
     parser.add_argument(
         "--threads", type=int, default=None, help="CPU threads (0 = automatic)"
+    )
+    parser.add_argument(
+        "--expert-budget-mb",
+        type=int,
+        default=None,
+        help="RAM cap in MiB for routed experts (0 keeps them all resident; a positive cap streams them from disk)",
+    )
+    parser.add_argument(
+        "--expert-spill-dir",
+        default=None,
+        help="directory for spilled expert weights (default: a temporary directory)",
     )
 
 
@@ -524,9 +539,22 @@ def cmd_checkpoint_convert(args: argparse.Namespace) -> int:
 
 def cmd_serve(args: argparse.Namespace) -> int:
     from fontaine.inference import load_generator, serve
+    from fontaine.inference.dense_store import DEFAULT_DENSE_BUDGET_MB
 
     config = _load(args)
     _apply_runtime_flags(config, args)
+    # Dense block streaming is a serving default: keep at least 12 GiB of
+    # dense block weight resident and stream the rest from disk. Passing
+    # --dense-budget-mb 0 keeps everything resident (previous behavior);
+    # generate/evaluate are unaffected.
+    config.inference.dense_budget_mb = (
+        args.dense_budget_mb
+        if args.dense_budget_mb is not None
+        else DEFAULT_DENSE_BUDGET_MB
+    )
+    if getattr(args, "dense_spill_dir", None):
+        config.inference.dense_spill_dir = args.dense_spill_dir
+    config.inference.validate()
     generator = load_generator(
         args.checkpoint, args.tokenizer_dir, config.inference, device=args.device,
         distributed=config.distributed,
@@ -792,6 +820,20 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--tokenizer-dir", required=True)
     serve.add_argument("--device", default="auto")
     _add_runtime_arguments(serve)
+    serve.add_argument(
+        "--dense-budget-mb",
+        type=int,
+        default=None,
+        help=(
+            "resident RAM floor in MiB for dense block weights "
+            "(default: 12288 = 12 GiB; 0 = keep everything resident)"
+        ),
+    )
+    serve.add_argument(
+        "--dense-spill-dir",
+        default=None,
+        help="directory for the streamed block files (default: a temporary directory)",
+    )
     serve.set_defaults(func=cmd_serve)
 
     return parser

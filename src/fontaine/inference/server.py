@@ -1,12 +1,17 @@
-"""Local inference API for Ollama-compatible chat UIs.
+"""Local inference API and the chat UI.
 
-Two API families share one process:
+Three API families share one process:
 
 - Fontaine-native: ``POST /generate`` (JSON + SSE streaming) and ``GET /health``.
-- Ollama-compatible, so Open WebUI and any other Ollama client connect to a
-  Fontaine checkpoint with no model conversion: ``GET /api/version``,
-  ``GET /api/tags``, ``GET /api/ps``, ``POST /api/show``, ``POST /api/chat``,
+- OpenAI-compatible, for the chat UI in ``web/``: ``GET /v1/models`` and
+  ``POST /v1/chat/completions`` (SSE).
+- Ollama-compatible, so any Ollama client connects to a Fontaine checkpoint
+  with no model conversion: ``GET /api/version``, ``GET /api/tags``,
+  ``GET /api/ps``, ``POST /api/show``, ``POST /api/chat``,
   ``POST /api/generate``, ``POST /api/context``. Streams are NDJSON.
+
+When ``web/dist`` exists (or ``FONTAINE_WEB_DIST`` points at a built UI),
+``GET /`` serves that single-page app. ``GET /api/meta`` is the JSON status.
 
 ``POST /api/show`` reports the checkpoint context length and the sampling
 defaults the way Ollama does for models such as GLM or DeepSeek
@@ -24,6 +29,7 @@ GPU workers — is an evolution of this contract, described in
 
 import hashlib
 import json
+import os
 import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -61,6 +67,54 @@ _OLLAMA_OPTION_MAP = {
 
 # Handled beside sampling overrides. num_ctx selects the context window.
 _CONTEXT_OPTION_KEYS = {"num_ctx"}
+
+_STATIC_MIME = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".json": "application/json",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+    ".webp": "image/webp",
+    ".map": "application/json",
+}
+
+
+def web_dist_dir() -> Path | None:
+    """Directory of the built chat UI, or None when it has not been built."""
+    override = os.environ.get("FONTAINE_WEB_DIST", "").strip()
+    candidates = [Path(override)] if override else []
+    candidates.append(Path.cwd() / "web" / "dist")
+    for path in candidates:
+        if (path / "index.html").is_file():
+            return path.resolve()
+    return None
+
+
+def _is_api_path(path: str) -> bool:
+    return path in ("/health", "/generate", "/api", "/v1") or path.startswith(("/api/", "/v1/"))
+
+
+def _openai_overrides(request: dict[str, Any]) -> dict[str, Any]:
+    """Translate an OpenAI chat request into engine sampling overrides."""
+    overrides: dict[str, Any] = {}
+    if request.get("temperature") is not None:
+        overrides["temperature"] = request["temperature"]
+    if request.get("top_p") is not None:
+        overrides["top_p"] = request["top_p"]
+    limit = request.get("max_completion_tokens", request.get("max_tokens"))
+    if limit is not None:
+        overrides["max_new_tokens"] = limit
+    return overrides
+
+
+def _completion_id() -> str:
+    return "chatcmpl-" + hashlib.sha256(f"{time.time_ns()}".encode()).hexdigest()[:24]
 
 
 def infer_model_name(checkpoint: str) -> str:
@@ -107,7 +161,7 @@ def _parse_num_ctx(options: Any) -> int | None:
 
 
 def _ollama_parameter_text(context_length: int, defaults: dict[str, Any]) -> str:
-    """Ollama ``parameters`` blob. Open WebUI reads this into the model controls."""
+    """Ollama ``parameters`` blob. Chat clients read this into the model controls."""
     lines = [
         f"num_ctx {context_length}",
         f"temperature {defaults['temperature']}",
@@ -127,7 +181,7 @@ def chat_status_reply(
 ) -> str:
     """Text to show in the chat bubble when the model writes nothing or fails.
 
-    Open WebUI displays assistant message content and skips an empty string, so
+    Chat UIs display assistant message content and skip an empty string, so
     a silent checkpoint otherwise looks like a blank reply.
     """
     if error:
@@ -201,14 +255,21 @@ def build_server(
         "details": details,
     }
     running_entry = {**model_entry, "context_length": context_length}
+    web_dist = web_dist_dir()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: Any) -> None:  # noqa: N802 (http.server API)
             logger.debug("http: " + format % args)
 
+        def _cors(self) -> None:
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
         def _json(self, status: int, payload: dict[str, Any]) -> None:
             body = json.dumps(payload).encode("utf-8")
             self.send_response(status)
+            self._cors()
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -218,13 +279,14 @@ def build_server(
             return self.path.split("?", 1)[0]
 
         def _meta(self) -> dict[str, Any]:
-            return {
+            payload: dict[str, Any] = {
                 "status": "ok",
                 "model": model_name,
                 "parameter_count": parameters,
                 "active_parameter_count": active_parameters,
                 "context_length": context_length,
                 "endpoints": {
+                    "openai": ["/v1/models", "/v1/chat/completions"],
                     "ollama": [
                         "/api/version",
                         "/api/tags",
@@ -235,21 +297,49 @@ def build_server(
                     ],
                     "native": ["/generate", "/health"],
                 },
-                "ui": "Point an Ollama-compatible UI (Open WebUI) at this server.",
+                "ui": "Chat UI is served at / when web/dist is present.",
             }
+            dense_store = getattr(generator, "dense_store", None)
+            if dense_store is not None:
+                stats = dense_store.stats()
+                payload["dense_streaming"] = {
+                    "blocks": len(dense_store),
+                    "resident_bytes": stats.resident_bytes,
+                    "capacity_bytes": stats.capacity_bytes,
+                    "requests": stats.requests,
+                    "hits": stats.hits,
+                    "misses": stats.misses,
+                    "prefetched": stats.prefetched,
+                    "bytes_read": stats.bytes_read,
+                    "directory": str(dense_store.directory),
+                }
+            return payload
+
+        def do_OPTIONS(self) -> None:  # noqa: N802 (http.server API)
+            self.send_response(204)
+            self._cors()
+            self.send_header("Access-Control-Max-Age", "86400")
+            self.end_headers()
 
         def do_GET(self) -> None:  # noqa: N802 (http.server API)
             path = self._route()
-            if path in ("/", "/api/meta"):
+            if path == "/api/meta" or (path == "/" and web_dist is None):
                 self._json(200, self._meta())
             elif path == "/health":
                 self._json(200, {"status": "ok"})
+            elif path == "/v1/models":
+                self._json(200, {
+                    "object": "list",
+                    "data": [{"id": model_name, "object": "model", "owned_by": "fontaine"}],
+                })
             elif path == "/api/version":
                 self._json(200, {"version": __version__})
             elif path == "/api/tags":
                 self._json(200, {"models": [model_entry]})
             elif path == "/api/ps":
                 self._json(200, {"models": [running_entry]})
+            elif self._try_static(path):
+                return
             else:
                 self._json(404, {"error": "not found"})
 
@@ -262,6 +352,8 @@ def build_server(
                 path = self._route()
                 if path == "/generate":
                     self._native_generate(request)
+                elif path == "/v1/chat/completions":
+                    self._openai_chat(request)
                 elif path == "/api/chat":
                     self._ollama_chat(request)
                 elif path == "/api/generate":
@@ -283,7 +375,10 @@ def build_server(
                 else:
                     self._json(404, {"error": "not found"})
             except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
-                self._json(400, {"error": f"bad request: {exc}"})
+                if self._route().startswith("/v1"):
+                    self._json(400, {"error": {"message": str(exc), "type": "invalid_request_error"}})
+                else:
+                    self._json(400, {"error": f"bad request: {exc}"})
             except Exception as exc:  # pragma: no cover - server safety net
                 logger.exception("request failed")
                 self._json(500, {"error": str(exc)})
@@ -304,6 +399,7 @@ def build_server(
 
         def _stream_response(self, generator: Generator, prompt: str, overrides: dict) -> None:
             self.send_response(200)
+            self._cors()
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
@@ -389,6 +485,7 @@ def build_server(
         ) -> None:
             """Stream an Ollama-style NDJSON response (one JSON object per line)."""
             self.send_response(200)
+            self._cors()
             self.send_header("Content-Type", "application/x-ndjson")
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
@@ -458,6 +555,111 @@ def build_server(
                 logger.debug("context budget unavailable for the status reply", exc_info=True)
                 return None
 
+        def _openai_chat(self, request: dict[str, Any]) -> None:
+            overrides = _with_chat_stops(_openai_overrides(request))
+            prompt = build_chat_prompt(request.get("messages"))
+            if request.get("stream", True):
+                self._openai_stream(prompt, overrides)
+                return
+            chunks = generator.generate(prompt, stream=True, **overrides)
+            text = "".join(chunks)
+            if not text.strip():
+                text = chat_status_reply(
+                    model_name, budget=self._chat_budget(prompt, overrides, None)
+                )
+            self._json(200, {
+                "id": _completion_id(),
+                "object": "chat.completion",
+                "model": model_name,
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": text},
+                    "finish_reason": "stop",
+                }],
+            })
+
+        def _openai_stream(self, prompt: str, overrides: dict) -> None:
+            completion = _completion_id()
+            self.send_response(200)
+            self._cors()
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+
+            def emit(payload: dict[str, Any] | None) -> None:
+                if payload is None:
+                    self.wfile.write(b"data: [DONE]\n\n")
+                else:
+                    self.wfile.write(f"data: {json.dumps(payload)}\n\n".encode())
+                self.wfile.flush()
+
+            def chunk(delta: dict[str, Any], finish: str | None) -> dict[str, Any]:
+                return {
+                    "id": completion,
+                    "object": "chat.completion.chunk",
+                    "model": model_name,
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+                }
+
+            pieces: list[str] = []
+            try:
+                first = True
+                chunks = generator.generate(prompt, stream=True, **overrides)
+                for delta in chunks:  # type: ignore[union-attr]
+                    pieces.append(delta)
+                    body = {"role": "assistant", "content": delta} if first else {"content": delta}
+                    first = False
+                    emit(chunk(body, None))
+                if not "".join(pieces).strip():
+                    text = chat_status_reply(
+                        model_name, budget=self._chat_budget(prompt, overrides, None)
+                    )
+                    emit(chunk({"role": "assistant", "content": text}, None))
+                emit(chunk({}, "stop"))
+                emit(None)
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("client disconnected during OpenAI SSE stream")
+            except Exception as exc:
+                logger.exception("generation failed")
+                try:
+                    emit(chunk({"content": chat_status_reply(model_name, error=str(exc))}, "stop"))
+                    emit(None)
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+
+        def _try_static(self, path: str) -> bool:
+            """Serve the built chat UI. Returns True when this method wrote the response."""
+            if web_dist is None:
+                return False
+            relative = path.lstrip("/")
+            if relative:
+                candidate = (web_dist / relative).resolve()
+                try:
+                    candidate.relative_to(web_dist)
+                except ValueError:
+                    self._json(404, {"error": "not found"})
+                    return True
+                if candidate.is_file():
+                    self._send_file(candidate)
+                    return True
+            if _is_api_path(path):
+                return False
+            index = web_dist / "index.html"
+            if index.is_file():
+                self._send_file(index)
+                return True
+            return False
+
+        def _send_file(self, path: Path) -> None:
+            body = path.read_bytes()
+            media = _STATIC_MIME.get(path.suffix.lower(), "application/octet-stream")
+            self.send_response(200)
+            self._cors()
+            self.send_header("Content-Type", media)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
     return server
@@ -470,9 +672,12 @@ def serve(
     server = build_server(generator, host, port, model_name=model_name)
     logger.info("Fontaine dev server listening on http://%s:%d (model: %s)", host, port, model_name)
     logger.info(
+        "OpenAI-compatible API: GET /v1/models | POST /v1/chat/completions"
+    )
+    logger.info(
         "Ollama-compatible API: POST /api/chat | POST /api/generate | GET /api/tags | POST /api/show"
     )
-    logger.info("connect an Ollama-compatible UI (Open WebUI) to http://%s:%d", host, port)
+    logger.info("chat UI: http://%s:%d", host, port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

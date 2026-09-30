@@ -3,7 +3,9 @@
 .gitignore
 .github
 
-# Python artifacts
+# Node
+node_modules
+web/node_modules
 __pycache__
 *.py[cod]
 .venv

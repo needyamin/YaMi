@@ -156,11 +156,12 @@ def test_version_and_tags(api_base):
 
 
 def test_show_advertises_context_like_an_ollama_model(api_base):
-    status = _get(api_base, "/")
+    status = _get(api_base, "/api/meta")
     assert status["model"] == "test-run"
     assert status["context_length"] >= 2
     assert "/api/chat" in status["endpoints"]["ollama"]
     assert "/api/ps" in status["endpoints"]["ollama"]
+    assert "/v1/chat/completions" in status["endpoints"]["openai"]
     assert status["active_parameter_count"] == status["parameter_count"]
     assert status["active_parameter_count"] > 0
 
@@ -317,3 +318,71 @@ def test_native_generate_contract_unchanged(api_base):
     response = _post(api_base, "/generate", {"prompt": "the fontaine"})
     assert isinstance(response["text"], str) and response["text"]
     assert _get(api_base, "/health") == {"status": "ok"}
+
+
+def test_openai_models_and_streaming_chat(api_base):
+    request = Request(api_base + "/v1/models")
+    with urlopen(request) as resp:
+        assert resp.headers["Access-Control-Allow-Origin"] == "*"
+        models = json.loads(resp.read())
+    assert models["data"][0]["id"] == "test-run"
+
+    request = Request(
+        api_base + "/v1/chat/completions",
+        data=json.dumps({
+            "model": "test-run",
+            "messages": [{"role": "user", "content": "the fontaine"}],
+            "stream": True,
+            "max_completion_tokens": 8,
+        }).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urlopen(request) as resp:
+        assert resp.headers["Content-Type"].startswith("text/event-stream")
+        raw = resp.read().decode()
+    assert raw.rstrip().endswith("data: [DONE]")
+    contents: list[str] = []
+    saw_stop = False
+    for line in raw.splitlines():
+        if not line.startswith("data:"):
+            continue
+        data = line[len("data:"):].strip()
+        if data == "[DONE]":
+            continue
+        event = json.loads(data)
+        choice = event["choices"][0]
+        text = choice["delta"].get("content")
+        if text:
+            contents.append(text)
+        if choice["finish_reason"] == "stop":
+            saw_stop = True
+    assert saw_stop
+    assert "".join(contents).strip()
+
+
+def test_chat_ui_static_files(model_config, tokenizer, tmp_path, monkeypatch):
+    (tmp_path / "index.html").write_bytes(b"<!doctype html><title>yami</title>")
+    (tmp_path / "app.js").write_bytes(b"console.log(1)\n")
+    monkeypatch.setenv("FONTAINE_WEB_DIST", str(tmp_path))
+    generator = Generator(
+        build_model(model_config),
+        tokenizer,
+        InferenceConfig(temperature=0.0, max_new_tokens=4),
+        device="cpu",
+    )
+    server = build_server(generator, host="127.0.0.1", port=0, model_name="static-ui")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with urlopen(base + "/") as resp:
+            assert resp.headers["Content-Type"].startswith("text/html")
+            assert b"yami" in resp.read()
+        assert _get(base, "/api/meta")["model"] == "static-ui"
+        with urlopen(base + "/app.js") as resp:
+            assert resp.read() == b"console.log(1)\n"
+        with pytest.raises(HTTPError) as excinfo:
+            _get(base, "/v1/missing")
+        assert excinfo.value.code == 404
+    finally:
+        server.shutdown()

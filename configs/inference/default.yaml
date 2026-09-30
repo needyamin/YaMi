@@ -15,3 +15,10 @@ inference:
   num_threads: 0            # CPU threads; 0 = PyTorch default (physical cores)
   server_host: 127.0.0.1
   server_port: 8321
+  expert_budget_mb: 0       # 0 = every expert stays in RAM. A positive MiB cap streams routed experts from disk.
+  expert_spill_dir: ""      # empty = a temporary directory for those expert files
+  # Dense block streaming is configured on the serve CLI, not here: the loader
+  # rejects unknown fields in this section. `fontaine serve --dense-budget-mb`
+  # sets the resident RAM floor (default 12288 MiB = 12 GiB; 0 = keep all
+  # block weights resident); blocks above the floor stream from disk.
+  # dense_budget_mb / dense_spill_dir exist on InferenceConfig for that path.

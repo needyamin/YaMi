@@ -3336,7 +3336,7 @@ evaluation:
     <div class="tl-item"><div class="tl-when">Phase 7 — done</div><h5>Evaluation &amp; inference</h5>
       <p>Registry-based validation loss/perplexity; KV-cached generation with sampling controls. <b>Success:</b> <code>fontaine generate</code> answers from a checkpoint, reproducibly.</p></div>
     <div class="tl-item"><div class="tl-when">Phase 7b — done</div><h5>Chat serving and the CPU ladder</h5>
-      <p>An Ollama-compatible API behind Open WebUI (model name Yami v1.0); the Yami Nano–Large configs with QK-norm and sliding windows; int8 CPU inference; <code>fontaine model recommend</code>; readers for code, records, and zip/tar archives. <b>Success:</b> any tier loads and generates on a CPU. Training them on real data is still ahead.</p></div>
+      <p>A chat UI and an Ollama-compatible API (model name Yami v1.0); the Yami Nano–Large configs with QK-norm and sliding windows; int8 CPU inference; <code>fontaine model recommend</code>; readers for code, records, and zip/tar archives. <b>Success:</b> any tier loads and generates on a CPU. Training them on real data is still ahead.</p></div>
     <div class="tl-item"><div class="tl-when">Phase 8 — in the code</div><h5>Post-training stages</h5>
       <p>Supervised fine-tuning masks tokens before <code>### Response:</code>. Preference training runs DPO (beta 0.1). Reinforcement learning scores the dataset answer with REINFORCE and does not sample a rollout. <b>Success still ahead:</b> a checkpoint that is visibly instruction-following after a real run.</p></div>
     <div class="tl-item"><div class="tl-when">Phase 9 — in the code</div><h5>Parallel training</h5>

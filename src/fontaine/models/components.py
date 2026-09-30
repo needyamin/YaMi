@@ -349,6 +349,9 @@ class MixtureOfExperts(nn.Module):
         self.top_k = config.num_experts_per_token
         self.capacity_factor = config.expert_capacity_factor
         self.kernel = config.kernel
+        self.activation = config.activation
+        self.layer_index = 0
+        self.expert_store = None
         self.expert_parallel_size = expert_parallel_size
         self.expert_parallel_rank = expert_parallel_rank
         self.router = nn.Linear(config.hidden_size, config.num_experts, bias=False)
@@ -364,6 +367,8 @@ class MixtureOfExperts(nn.Module):
         self.last_stats: dict[str, float] = {}
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.expert_store is not None:
+            self.expert_store.prefetch_previous(self.layer_index)
         combined, aux = self.local_forward(x)
         if self.expert_parallel_size > 1:
             combined = _all_reduce_expert_outputs(combined, self.parallel_group)
@@ -380,6 +385,8 @@ class MixtureOfExperts(nn.Module):
             routed, aux = self._reference_dispatch(x, probs, top_v, top_i)
             counts = torch.bincount(top_i.reshape(-1), minlength=self.num_experts)
             self._record_stats(probs, counts, 0)
+            chosen = sorted({int(expert_id) for expert_id in top_i.reshape(-1).tolist()})
+            self._note_routing(chosen)
             return routed, aux
 
         flat_x = x.reshape(-1, hidden)
@@ -402,6 +409,7 @@ class MixtureOfExperts(nn.Module):
 
         combined = flat_x.new_zeros(flat_x.shape)
         dropped = 0
+        chosen: list[int] = []
         start = 0
         for expert_id, count in enumerate(counts.tolist()):
             if count == 0:
@@ -411,17 +419,18 @@ class MixtureOfExperts(nn.Module):
             start += count
             if expert_id not in local:
                 continue
+            chosen.append(expert_id)
             if capacity and count > capacity:
                 choice = torch.topk(weights.squeeze(-1), capacity).indices
                 dropped += count - capacity
                 tokens = tokens.index_select(0, choice)
                 weights = weights.index_select(0, choice)
-            expert = self.experts[local[expert_id]]
-            out = expert(flat_x.index_select(0, tokens)) * weights
+            out = self._run_expert(expert_id, local[expert_id], flat_x.index_select(0, tokens)) * weights
             combined = combined.index_add(0, tokens, out)
 
         routed = combined.view(batch, seq_len, hidden)
         self._record_stats(probs, counts, dropped)
+        self._note_routing(chosen)
 
         assignment = F.one_hot(flat_i, num_classes=self.num_experts).to(probs.dtype)
         fraction = assignment.sum(dim=(0, 1)) / (n_tokens * self.top_k)
@@ -443,8 +452,10 @@ class MixtureOfExperts(nn.Module):
         combined = flat_x.new_zeros(flat_x.shape)
         for token in range(flat_x.shape[0]):
             for slot in range(self.top_k):
-                expert = self.experts[int(flat_i[token, slot])]
-                combined[token] = combined[token] + flat_v[token, slot] * expert(flat_x[token][None])[0]
+                expert_id = int(flat_i[token, slot])
+                combined[token] = combined[token] + flat_v[token, slot] * self._run_expert(
+                    expert_id, expert_id, flat_x[token][None]
+                )[0]
         routed = combined.view(batch, seq_len, hidden)
         n_tokens = flat_x.shape[0]
         assignment = F.one_hot(flat_i, num_classes=self.num_experts).to(probs.dtype)
@@ -466,6 +477,17 @@ class MixtureOfExperts(nn.Module):
             "load_imbalance": float(imbalance),
             "tokens": float(counts.sum()),
         }
+
+    def _run_expert(self, expert_id: int, module_index: int, inputs: torch.Tensor) -> torch.Tensor:
+        if self.expert_store is None:
+            return self.experts[module_index](inputs)
+        return self.expert_store.run(self.layer_index, expert_id, inputs, self.activation, self.kernel)
+
+    def _note_routing(self, expert_ids: list[int]) -> None:
+        if self.expert_store is None:
+            return
+        self.expert_store.remember(self.layer_index, expert_ids)
+        self.expert_store.prefetch_previous(self.layer_index + 1)
 
 
 class TransformerBlock(nn.Module):
@@ -496,6 +518,7 @@ class TransformerBlock(nn.Module):
         self.mlp: FeedForward | MixtureOfExperts
         if config.num_experts > 1:
             self.mlp = MixtureOfExperts(config, expert_parallel_size, expert_parallel_rank)
+            self.mlp.layer_index = layer_idx
         else:
             self.mlp = FeedForward(config)
         self.resid_dropout = nn.Dropout(config.dropout)

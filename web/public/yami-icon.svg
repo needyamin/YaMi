@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 168 168">
+  <!-- YaMi v1.0 — pixel mascot "Pip": a small round helper with a glowing
+       antenna, two bright eyes and a smile. Drawn on a 14px grid so the pixels
+       land on whole units and stay crisp at favicon size. Palette is the login
+       page's blue: #1b4fbf shadow, #2f6feb body, #3d7bf0 mid, #8fd0ff highlight. -->
+  <rect width="168" height="168" rx="36" fill="#080b0d"/>
+  <g shape-rendering="crispEdges">
+
+    <!-- antenna: stem then a bright tip -->
+    <rect x="77" y="21" width="14" height="14" fill="#3d7bf0"/>
+    <rect x="77" y="35" width="14" height="14" fill="#3d7bf0"/>
+    <rect x="77" y="7"  width="14" height="14" fill="#8fd0ff"/>
+
+    <!-- head -->
+    <rect x="49" y="49"  width="14" height="14" fill="#2f6feb"/>
+    <rect x="63" y="49"  width="14" height="14" fill="#2f6feb"/>
+    <rect x="77" y="49"  width="14" height="14" fill="#2f6feb"/>
+    <rect x="91" y="49"  width="14" height="14" fill="#2f6feb"/>
+
+    <!-- eye row: white sclera, dark pupil -->
+    <rect x="35" y="63"  width="14" height="14" fill="#2f6feb"/>
+    <rect x="49" y="63"  width="14" height="14" fill="#3d7bf0"/>
+    <rect x="63" y="63"  width="14" height="14" fill="#ffffff"/>
+    <rect x="77" y="63"  width="14" height="14" fill="#3d7bf0"/>
+    <rect x="91" y="63"  width="14" height="14" fill="#ffffff"/>
+    <rect x="105" y="63" width="14" height="14" fill="#2f6feb"/>
+
+    <rect x="35" y="77"  width="14" height="14" fill="#2f6feb"/>
+    <rect x="49" y="77"  width="14" height="14" fill="#3d7bf0"/>
+    <rect x="63" y="77"  width="14" height="14" fill="#1b4fbf"/>
+    <rect x="77" y="77"  width="14" height="14" fill="#3d7bf0"/>
+    <rect x="91" y="77"  width="14" height="14" fill="#1b4fbf"/>
+    <rect x="105" y="77" width="14" height="14" fill="#2f6feb"/>
+
+    <!-- cheeks (highlight) and the smile -->
+    <rect x="35" y="91"  width="14" height="14" fill="#2f6feb"/>
+    <rect x="49" y="91"  width="14" height="14" fill="#8fd0ff"/>
+    <rect x="63" y="91"  width="14" height="14" fill="#3d7bf0"/>
+    <rect x="77" y="91"  width="14" height="14" fill="#1b4fbf"/>
+    <rect x="91" y="91"  width="14" height="14" fill="#3d7bf0"/>
+    <rect x="105" y="91" width="14" height="14" fill="#8fd0ff"/>
+
+    <rect x="35" y="105" width="14" height="14" fill="#2f6feb"/>
+    <rect x="49" y="105" width="14" height="14" fill="#3d7bf0"/>
+    <rect x="63" y="105" width="14" height="14" fill="#2f6feb"/>
+    <rect x="77" y="105" width="14" height="14" fill="#2f6feb"/>
+    <rect x="91" y="105" width="14" height="14" fill="#2f6feb"/>
+    <rect x="105" y="105" width="14" height="14" fill="#3d7bf0"/>
+
+    <!-- bottom -->
+    <rect x="49" y="119" width="14" height="14" fill="#2f6feb"/>
+    <rect x="63" y="119" width="14" height="14" fill="#2f6feb"/>
+    <rect x="77" y="119" width="14" height="14" fill="#2f6feb"/>
+    <rect x="91" y="119" width="14" height="14" fill="#2f6feb"/>
+
+    <!-- feet -->
+    <rect x="49" y="133" width="14" height="14" fill="#1b4fbf"/>
+    <rect x="63" y="133" width="14" height="14" fill="#1b4fbf"/>
+    <rect x="77" y="133" width="14" height="14" fill="#1b4fbf"/>
+    <rect x="91" y="133" width="14" height="14" fill="#1b4fbf"/>
+
+  </g>
+</svg>

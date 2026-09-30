@@ -135,7 +135,7 @@ same template, so you type a normal question and the server wraps it.</p>
   <tr><td>Model</td><td>The network. Dense configs use every weight on every token. Coding configs are a mixture of experts: all experts are stored (total parameters), and only the top 1 or 2 run per token (active parameters).</td></tr>
   <tr><td>Tokenizer</td><td>Byte-level BPE dictionary in <code>datasets/tokenizer</code>. The model and the tokenizer must stay paired.</td></tr>
   <tr><td>Checkpoint</td><td>A saved snapshot under <code>experiments/&lt;run&gt;/checkpoints</code>. Pointing at the <code>checkpoints</code> folder serves the newest step.</td></tr>
-  <tr><td>Docker</td><td>One CPU image. <code>web</code> is the API, <code>webui</code> is Open WebUI, <code>train</code> is a one-off training run. Weights stay on the host; they are not baked into the image.</td></tr>
+  <tr><td>Docker</td><td>One CPU image. <code>web</code> is the chat UI and the API, <code>train</code> is a one-off training run. Weights stay on the host; they are not baked into the image.</td></tr>
 </table>
 
 <h2>Model sizes</h2>
@@ -332,17 +332,17 @@ fewer steps.</p>
 <p>Copy <code>.env.example</code> to <code>.env</code> and set
 <code>FONTAINE_CHECKPOINT</code> to the container path of a run’s
 <code>checkpoints</code> folder. A missing folder makes the API fail at
-startup. Ports: the API is <code>8321</code> on the host
-(<code>FONTAINE_PORT</code>), and Open WebUI is <code>3000</code>
-(<code>WEBUI_PORT</code>).</p>
+startup. The chat UI and the API share port <code>8321</code> on the host
+(<code>FONTAINE_PORT</code>).</p>
 
 <pre><code>cp .env.example .env
-docker compose up -d web webui</code></pre>
+docker compose up -d web</code></pre>
 
-<p>Open <a href="http://localhost:3000">http://localhost:3000</a>. Open WebUI
-talks to the Fontaine API over the Ollama protocol (<code>/api/chat</code>,
-<code>/api/tags</code>, <code>/api/show</code>). The model picker shows
-<b>Yami v1.0</b>, and the context control uses the checkpoint maximum.
+<p>Open <a href="http://localhost:8321">http://localhost:8321</a>. The chat UI
+talks to the Fontaine API over <code>/v1/chat/completions</code>. Curl can use
+that route or the Ollama routes (<code>/api/chat</code>, <code>/api/tags</code>,
+<code>/api/show</code>). The model picker shows
+<b>Yami v1.0</b>.
 You do not type the Alpaca wrapper. Sampling defaults
 for code are temperature 0.2, top-p 0.9, and a light repetition penalty.
 The API also stops a chat reply before a fake next <code>### Instruction:</code>.
@@ -355,10 +355,10 @@ Override with <code>--precision fp32|fp16|bf16|int8|int4</code> and set CPU thre
 <code>/api/show</code> reports the format as <code>F32</code>, <code>BF16</code>,
 or <code>Q8_0</code>.</p>
 
-<p>After a new training run, edit <code>.env</code> and recreate the containers.
-No image rebuild is required unless the Python source changed.</p>
+<p>After a new training run, edit <code>.env</code> and recreate the container.
+No image rebuild is required unless the Python or chat UI source changed.</p>
 
-<pre><code>docker compose up -d web webui</code></pre>
+<pre><code>docker compose up -d web</code></pre>
 
 <p>The API itself is at <code>http://localhost:8321</code>. A direct check:</p>
 
@@ -368,20 +368,19 @@ curl -X POST http://localhost:8321/api/chat \
   -d '{"messages":[{"role":"user","content":"Write a Python function that adds two numbers."}],"stream":false}'</code></pre>
 
 <div class="box-warning"><strong>Local only.</strong> There is no login on the
-API, and Open WebUI auth is off for local development. Do not publish ports
-8321 or 3000 on the internet.</div>
+API. Do not publish port 8321 on the internet.</div>
 
 <h2>Commands</h2>
 
 <table>
   <tr><th>Task</th><th>Command</th></tr>
-  <tr><td>Start chat</td><td><code>docker compose up -d web webui</code></td></tr>
+  <tr><td>Start chat</td><td><code>docker compose up -d web</code></td></tr>
   <tr><td>See if the API is up</td><td><code>docker compose ps</code></td></tr>
   <tr><td>API log</td><td><code>docker compose logs -f web</code></td></tr>
   <tr><td>Train tiny</td><td><code>docker compose run --rm train</code></td></tr>
-  <tr><td>Serve a new checkpoint</td><td>Edit <code>FONTAINE_CHECKPOINT</code> in <code>.env</code>, then <code>docker compose up -d web webui</code></td></tr>
+  <tr><td>Serve a new checkpoint</td><td>Edit <code>FONTAINE_CHECKPOINT</code> in <code>.env</code>, then <code>docker compose up -d web</code></td></tr>
   <tr><td>Stop</td><td><code>docker compose down</code></td></tr>
-  <tr><td>Rebuild after source changes</td><td><code>docker compose up -d --build web webui</code></td></tr>
+  <tr><td>Rebuild after source changes</td><td><code>docker compose up -d --build web</code></td></tr>
   <tr><td>Inspect a size</td><td><code>python -m fontaine.cli.main model inspect --model-config configs/model/tiny.yaml</code></td></tr>
   <tr><td>Count a super profile</td><td><code>python -m fontaine.cli.main model estimate-params --config configs/yami_super.yaml --profile 7b</code></td></tr>
   <tr><td>Pick a size for this machine</td><td><code>python -m fontaine.cli.main model recommend</code></td></tr>

@@ -2,10 +2,24 @@
 
 ## Today: local dev API
 
-`fontaine serve` (stdlib-only) exposes two API families. Open WebUI is the
-chat interface; it connects over the Ollama API.
+`fontaine serve` (stdlib-only) exposes three API families. The chat UI in
+`web/` is served from the same process when `web/dist` is present.
 
-**Ollama-compatible** — Open WebUI and any other Ollama client connect to a
+**OpenAI-compatible** — the chat UI calls these. Streams are SSE.
+
+```
+GET  /v1/models
+POST /v1/chat/completions
+     {"messages": [{"role": "user", "content": "..."}], "stream": true,
+      "temperature": 0.7, "max_completion_tokens": 256}
+→ data: {"choices": [{"delta": {"content": "..."}}]} × N
+→ data: [DONE]
+```
+
+`max_completion_tokens` (or `max_tokens`) maps to `max_new_tokens`. The same
+Alpaca template and chat stop sequences as `/api/chat` apply.
+
+**Ollama-compatible** — any Ollama client connects to a
 Fontaine checkpoint directly, with no model conversion. Streams are NDJSON
 (one JSON object per line). `POST /api/show` includes `capabilities`,
 a `parameters` block (`num_ctx`, `temperature`, `top_k`, `top_p`,
@@ -45,7 +59,7 @@ stops at `\n### Instruction:` and `\n### Input:` so the model does not invent
 the next user turn. `/api/generate` does not add those stops.
 
 The name in that list is `inference.model_name` (default **Yami v1.0**),
-which is what Open WebUI and other Ollama clients show in the model picker.
+which is what the chat UI and other clients show in the model picker.
 `details.parameter_size` is the total parameter count. `active_parameter_size`,
 and `general.active_parameter_count` on `/api/show`, are the weights one token
 actually multiplies (equal to the total for a dense model; smaller for

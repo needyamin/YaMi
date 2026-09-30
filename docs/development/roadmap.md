@@ -38,9 +38,9 @@ trainer changes (test-enforced); `fontaine evaluate` works standalone.
 **Done when:** KV-cached generation with temperature/top-k/top-p/repetition
 penalty/stop sequences/max tokens; streaming deltas; deterministic seeding;
 `fontaine generate` + dev `/generate` API; generation correctness tests pass.
-The same server now also speaks the Ollama-compatible chat API used by
-Open WebUI (`/api/chat`, `/api/tags`, `/api/ps`, `/api/show`); see
-`docs/deployment/serving.md`.
+The same server now also speaks the chat API (`/v1/chat/completions`,
+`/api/chat`, `/api/tags`, `/api/ps`, `/api/show`) and can serve the chat UI
+from `web/dist`; see `docs/deployment/serving.md`.
 
 ## Phase 7 — Fine-Tuning (next)
 **Done when:** instruction-format dataset adapter (prompt-masked labels);

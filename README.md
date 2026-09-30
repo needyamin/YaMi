@@ -42,11 +42,13 @@ On Windows, if `fontaine` is not on PATH, use `python -m fontaine.cli.main <comm
 ## Chat
 
 ```bash
-cp .env.example .env           # which checkpoint to serve, and the host ports
-docker compose up -d web webui # chat UI → http://localhost:3000  (model: Yami v1.0)
+cp .env.example .env        # which checkpoint to serve, and the host port
+docker compose up -d web    # chat UI + API → http://localhost:8321  (model: Yami v1.0)
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The picker shows **Yami v1.0**, and its context length is the checkpoint maximum. The API is [http://localhost:8321](http://localhost:8321) (`/api/chat`, `/api/tags`, `/api/show`). Set the checkpoint in `.env` (`FONTAINE_CHECKPOINT`). Details: [docs/deployment/docker.md](docs/deployment/docker.md).
+Open [http://localhost:8321](http://localhost:8321). The picker shows **Yami v1.0**. The same process serves the chat UI and the API (`/v1/chat/completions`, `/api/chat`, `/api/tags`, `/api/show`). Set the checkpoint in `.env` (`FONTAINE_CHECKPOINT`). Details: [docs/deployment/docker.md](docs/deployment/docker.md).
+
+Serving keeps **at least 12 GiB of dense block weights resident in RAM** by default; when the model is bigger, the rest of the blocks live on disk and stream in per layer with an LRU cache and background prefetch (`GET /api/meta` reports `dense_streaming` counters). Pass `--dense-budget-mb <MiB>` to change the floor or `--dense-budget-mb 0` to keep everything resident. Smaller models are untouched.
 
 ## Train
 

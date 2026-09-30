@@ -71,9 +71,10 @@ fontaine serve --checkpoint <ckpt> --tokenizer-dir datasets/tokenizer
 curl -X POST localhost:8321/generate -d '{"prompt": "Hi", "stream": false}'
 ```
 
-The same process speaks the Ollama-compatible API (`/api/chat`,
-`/api/tags`, `/api/ps`, `/api/show`) so Open WebUI can attach with no model
-conversion. `/api/show` reports the checkpoint context length, and a request
+The same process speaks an OpenAI-compatible API (`GET /v1/models`,
+`POST /v1/chat/completions`) for the chat UI in `web/`, and the
+Ollama-compatible API (`/api/chat`, `/api/tags`, `/api/ps`, `/api/show`).
+`/api/show` reports the checkpoint context length, and a request
 may set `num_ctx`; generation uses that window when it is smaller than
 `max_sequence_length`. Route details, the Alpaca chat template, and active
 versus total parameter reporting are in `docs/deployment/serving.md`. This
